@@ -26,6 +26,7 @@ class Contact extends Model
         'end_calling',
         'attempt_count',
         'additional_data',
+        'call_id'
     ];
 
     /**

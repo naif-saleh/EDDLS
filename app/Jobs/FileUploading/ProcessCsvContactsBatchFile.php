@@ -5,6 +5,7 @@ namespace App\Jobs\FileUploading;
 use App\Models\Campaign;
 use App\Models\Provider;
 use App\Models\SkippedNumber;
+use App\Services\LicenseService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -41,8 +42,8 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
         $this->tenantId = $tenantId;
 
         // Validate tenant ID
-        if (empty($this->tenantId) || !is_numeric($this->tenantId)) {
-            Log::error("Invalid tenant ID in job construction: " . var_export($this->tenantId, true));
+        if (empty($this->tenantId) || ! is_numeric($this->tenantId)) {
+            Log::error('Invalid tenant ID in job construction: '.var_export($this->tenantId, true));
         } else {
             Log::info("CSV job constructed for tenant ID: {$this->tenantId}, batch: {$this->batchId}");
         }
@@ -53,55 +54,61 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
      */
     public function handle()
     {
+
         Log::info("Starting CSV import for batch: {$this->batchId}, file: {$this->fileName}, tenant: {$this->tenantId}");
 
         // Verify the tenant actually exists
         $tenantExists = DB::table('tenants')->where('id', $this->tenantId)->exists();
-        if (!$tenantExists) {
+        if (! $tenantExists) {
             Log::error("Cannot process CSV import: Tenant ID {$this->tenantId} does not exist");
+
             return;
         }
 
-        if (!file_exists($this->filePath)) {
+        if (! file_exists($this->filePath)) {
             Log::error("File not found: {$this->filePath}");
+
             return;
         }
 
         $file = fopen($this->filePath, 'r');
-        if (!$file) {
+        if (! $file) {
             Log::error("Could not open file: {$this->filePath}");
+
             return;
         }
 
         // Read and validate the header
         $header = fgetcsv($file);
-        if (!$header) {
+        if (! $header) {
             Log::error("Empty or invalid CSV file: {$this->filePath}");
             fclose($file);
             unlink($this->filePath);
+
             return;
         }
 
         // Trim header values to remove potential whitespace
         $header = array_map('trim', $header);
 
-        Log::info("CSV headers: " . implode(', ', $header));
+        Log::info('CSV headers: '.implode(', ', $header));
 
         // Check for required columns
         $requiredColumns = ['file_name', 'provider_name', 'provider_extension', 'phone_number', 'start_time', 'end_time'];
         $missingColumns = [];
 
         foreach ($requiredColumns as $column) {
-            if (!in_array($column, $header)) {
+            if (! in_array($column, $header)) {
                 $missingColumns[] = $column;
             }
         }
 
-        if (!empty($missingColumns)) {
+        if (! empty($missingColumns)) {
             $missingColumnsList = implode(', ', $missingColumns);
             Log::error("Missing required columns in CSV file: {$missingColumnsList}");
             fclose($file);
             unlink($this->filePath);
+
             return;
         }
 
@@ -115,18 +122,19 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
 
         while (($row = fgetcsv($file)) !== false) {
             $rowNumber++;
-
+            $licenseSevice = new LicenseService;
             // Skip empty rows
             if (empty($row) || count(array_filter($row)) === 0) {
                 Log::warning("Skipping empty row at line {$rowNumber}");
                 $skippedCount++;
+
                 continue;
             }
 
             // Check if row count matches header count
             if (count($row) !== count($header)) {
-                Log::warning("Skipping malformed row at line {$rowNumber}. Expected " . count($header) .
-                             " columns but got " . count($row) . ". Row data: " . json_encode($row));
+                Log::warning("Skipping malformed row at line {$rowNumber}. Expected ".count($header).
+                             ' columns but got '.count($row).'. Row data: '.json_encode($row));
 
                 // Track skipped malformed row
                 try {
@@ -144,7 +152,7 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                     $providerId = null;
                     if ($providerName || $providerExtension) {
                         $provider = Provider::where('tenant_id', $this->tenantId)
-                            ->where(function($query) use ($providerName, $providerExtension) {
+                            ->where(function ($query) use ($providerName, $providerExtension) {
                                 $query->where('name', $providerName)
                                     ->orWhere('extension', $providerExtension);
                             })
@@ -176,10 +184,11 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                         $partialData
                     );
                 } catch (\Exception $e) {
-                    Log::error("Error saving skipped number for malformed row: " . $e->getMessage());
+                    Log::error('Error saving skipped number for malformed row: '.$e->getMessage());
                 }
 
                 $skippedCount++;
+
                 continue;
             }
 
@@ -192,7 +201,7 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                 // Validate required fields
                 if (empty($data['file_name']) || empty($data['provider_name']) ||
                     empty($data['provider_extension']) || empty($data['phone_number'])) {
-                    Log::warning("Skipping row {$rowNumber} with missing required fields: " . json_encode($data));
+                    Log::warning("Skipping row {$rowNumber} with missing required fields: ".json_encode($data));
 
                     // Track skipped row with missing fields
                     $this->saveSkippedNumber(
@@ -206,47 +215,49 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                     );
 
                     $skippedCount++;
+
                     continue;
                 }
 
                 $fileName = $data['file_name'];
                 $providerName = $data['provider_name'];
                 $providerExtension = $data['provider_extension'];
-                $providerKey = $providerName . '|' . $providerExtension;
+                $providerKey = $providerName.'|'.$providerExtension;
 
                 // Check if this file already has an assigned provider that's different from current row
-                if (isset($fileToCampaignProvider[$fileName]) &&
-                    $fileToCampaignProvider[$fileName] !== $providerKey) {
-                    Log::warning("Skipping row {$rowNumber}: File '{$fileName}' already associated with different provider. " .
-                                "Expected '{$fileToCampaignProvider[$fileName]}', got '{$providerKey}'");
+                // if (isset($fileToCampaignProvider[$fileName]) &&
+                //     $fileToCampaignProvider[$fileName] !== $providerKey) {
+                //     Log::warning("Skipping row {$rowNumber}: File '{$fileName}' already associated with different provider. ".
+                //                 "Expected '{$fileToCampaignProvider[$fileName]}', got '{$providerKey}'");
 
-                    // Track skipped row with provider mismatch
-                    $previousProviderKey = $fileToCampaignProvider[$fileName];
-                    list($prevProvName, $prevProvExt) = explode('|', $previousProviderKey);
-                    $prevProvider = Provider::where('tenant_id', $this->tenantId)
-                        ->where('name', $prevProvName)
-                        ->where('extension', $prevProvExt)
-                        ->first();
+                //     // Track skipped row with provider mismatch
+                //     $previousProviderKey = $fileToCampaignProvider[$fileName];
+                //     [$prevProvName, $prevProvExt] = explode('|', $previousProviderKey);
+                //     $prevProvider = Provider::where('tenant_id', $this->tenantId)
+                //         ->where('name', $prevProvName)
+                //         ->where('extension', $prevProvExt)
+                //         ->first();
 
-                    $this->saveSkippedNumber(
-                        $data['phone_number'],
-                        $prevProvider ? $prevProvider->id : null,
-                        null, // No campaign ID for provider mismatch
-                        'file_provider_mismatch',
-                        $fileName,
-                        $rowNumber,
-                        $data
-                    );
+                //     $this->saveSkippedNumber(
+                //         $data['phone_number'],
+                //         $prevProvider ? $prevProvider->id : null,
+                //         null, // No campaign ID for provider mismatch
+                //         'file_provider_mismatch',
+                //         $fileName,
+                //         $rowNumber,
+                //         $data
+                //     );
 
-                    $skippedCount++;
-                    continue;
-                }
+                //     $skippedCount++;
 
+                //     continue;
+                // }
+ 
                 // Associate this file with this provider
                 $fileToCampaignProvider[$fileName] = $providerKey;
 
                 // Get or create provider (using cache to reduce DB queries)
-                if (!isset($providerCache[$providerKey])) {
+                if (! isset($providerCache[$providerKey])) {
                     try {
                         // First try to find the existing provider with tenant scope
                         $provider = Provider::where('tenant_id', $this->tenantId)
@@ -254,13 +265,13 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                             ->where('extension', $providerExtension)
                             ->first();
 
-                        if (!$provider) {
+                        if (! $provider) {
                             // Generate a base slug
-                            $baseSlug = Str::slug($providerName . '-' . $providerExtension);
+                            $baseSlug = Str::slug($providerName.'-'.$providerExtension);
 
                             // If the base slug is empty (e.g., from non-Latin characters), use a fallback
                             if (empty($baseSlug)) {
-                                $baseSlug = 'provider-' . substr(md5($providerName . $providerExtension), 0, 8);
+                                $baseSlug = 'provider-'.substr(md5($providerName.$providerExtension), 0, 8);
                             }
 
                             // Check if the slug already exists within this tenant
@@ -273,19 +284,23 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                             // If the slug exists, append a counter until we find a unique slug
                             while ($slugExists) {
                                 $counter++;
-                                $slug = $baseSlug . '-' . $counter;
+                                $slug = $baseSlug.'-'.$counter;
                                 $slugExists = Provider::where('tenant_id', $this->tenantId)
                                     ->where('slug', $slug)
                                     ->exists();
                             }
-
-                            // Create the provider with the unique slug and ensure tenant_id is set
-                            $provider = Provider::create([
-                                'tenant_id' => $this->tenantId,
-                                'slug' => $slug,
-                                'name' => $providerName,
-                                'extension' => $providerExtension,
-                            ]);
+                            // Check if Licesnse is valid
+                            if ($licenseSevice->validProvidersCount($this->tenantId)) {
+                                // Create the provider with the unique slug and ensure tenant_id is set
+                                $provider = Provider::create([
+                                    'tenant_id' => $this->tenantId,
+                                    'slug' => $slug,
+                                    'name' => $providerName,
+                                    'extension' => $providerExtension,
+                                ]);
+                            } else {
+                                Log::error("Tenant {$this->tenantId}: License validation failed. Cannot process CSV import.");
+                            }
                             Log::info("Tenant {$this->tenantId}: Created new provider: {$providerName} ({$providerExtension}) with slug: {$slug}, ID: {$provider->id}");
                         } else {
                             Log::info("Tenant {$this->tenantId}: Found existing provider: {$providerName} ({$providerExtension}) with slug: {$provider->slug}, ID: {$provider->id}");
@@ -293,76 +308,124 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
 
                         $providerCache[$providerKey] = $provider->id;
                     } catch (\Exception $e) {
-                        Log::error("Tenant {$this->tenantId}: Error processing provider {$providerName} ({$providerExtension}): " . $e->getMessage());
+                        Log::error("Tenant {$this->tenantId}: Error processing provider {$providerName} ({$providerExtension}): ".$e->getMessage());
                         throw $e;
                     }
+
                 }
                 $providerId = $providerCache[$providerKey];
 
                 // Get or create campaign based on the file_name in the current row
-                $campaignKey = $fileName . '|' . $providerKey;
-                if (!isset($campaignCache[$campaignKey])) {
+                $campaignKey = $fileName.'|'.$providerKey;
+                if (! isset($campaignCache[$campaignKey])) {
                     try {
-                        // Generate a base slug
-                        $baseSlug = Str::slug($fileName . '-' . $providerExtension);
+                        // Generate a unique slug using multiple uniqueness factors
+                        $uniqueId = Str::uuid()->toString(); // Guaranteed unique UUID
+                        $timestamp = now()->format('YmdHis');
+                        $microseconds = sprintf('%06d', now()->microsecond); // Add microseconds for extra uniqueness
+                        $tenantPrefix = substr(md5($this->tenantId), 0, 6); // Tenant-specific prefix
 
-                        // If the base slug is empty (e.g., from non-Latin characters), use a fallback
-                        if (empty($baseSlug)) {
-                            $baseSlug = 'campaign-' . substr(md5($fileName . $providerExtension), 0, 8);
+                        // Create base slug from filename and provider
+                        $fileNameSlug = Str::slug($fileName);
+
+                        // If the filename produces an empty slug (e.g., from non-Latin characters), use a fallback
+                        if (empty($fileNameSlug)) {
+                            $fileNameSlug = 'campaign-'.substr(md5($fileName), 0, 8);
                         }
 
-                        // Add a timestamp to ensure uniqueness
-                        $timestamp = date('YmdHis');
-                        $uniqueSlug = $baseSlug . '-' . $timestamp;
-
-                        // Check if the slug already exists within this tenant
-                        $slugExists = Campaign::where('tenant_id', $this->tenantId)
-                            ->where('slug', $uniqueSlug)
-                            ->exists();
-                        $counter = 0;
-                        $slug = $uniqueSlug;
-
-                        // If the slug exists, append a counter until we find a unique slug
-                        while ($slugExists) {
-                            $counter++;
-                            $slug = $uniqueSlug . '-' . $counter;
-                            $slugExists = Campaign::where('tenant_id', $this->tenantId)
-                                ->where('slug', $slug)
-                                ->exists();
+                        // Provider extension part
+                        $providerPart = Str::slug($providerExtension);
+                        if (empty($providerPart)) {
+                            $providerPart = 'p'.substr(md5($providerExtension), 0, 4);
                         }
 
-                        // Prepare campaign data
-                        $campaignData = [
-                            'tenant_id' => $this->tenantId,
-                            'provider_id' => $providerId,
-                            'slug' => $slug,
-                            'name' => $fileName,
-                            'start_time' => $data['start_time'] ?? now()->format('Y-m-d H:i:s'),
-                            'end_time' => $data['end_time'] ?? now()->addHours(1)->format('Y-m-d H:i:s'),
-                            'campaign_type' => 'dialer',
-                        ];
+                        // Combine all elements to create a unique slug
+                        // Format: tenant-prefix_filename_provider_timestamp_microseconds_uniqueId(short)
+                        $uniqueSlug = $tenantPrefix.'_'.
+                                      $fileNameSlug.'_'.
+                                      $providerPart.'_'.
+                                      $timestamp.
+                                      $microseconds.'_'.
+                                      substr($uniqueId, 0, 8);
 
-                        // Check if batch_id column exists before adding it
-                        if (Schema::hasColumn('campaigns', 'batch_id')) {
-                            $campaignData['batch_id'] = $this->batchId;
-                        } else {
-                            Log::warning("Tenant {$this->tenantId}: batch_id column doesn't exist in campaigns table. Continuing without it.");
+                        // Ensure the slug is not too long (DB column might have limits)
+                        if (strlen($uniqueSlug) > 190) { // Allowing some margin for MySQL indexes (max 191)
+                            $uniqueSlug = $tenantPrefix.'_'.
+                                          substr(md5($fileNameSlug), 0, 8).'_'.
+                                          substr(md5($providerPart), 0, 6).'_'.
+                                          $timestamp.
+                                          $microseconds.'_'.
+                                          substr($uniqueId, 0, 8);
                         }
 
-                        // Always create a new campaign with the unique slug and ensure tenant_id is set
-                        $campaign = Campaign::create($campaignData);
+                        // Double-check uniqueness just to be absolutely certain
+                        $isUnique = false;
+                        $attempts = 0;
+                        $finalSlug = $uniqueSlug;
 
-                        Log::info("Tenant {$this->tenantId}: Created new campaign: {$fileName} with slug: {$slug}, ID: {$campaign->id}, batch: {$this->batchId}");
+                        while (! $isUnique && $attempts < 10) {
+                            $exists = Campaign::where('slug', $finalSlug)->exists();
+
+                            if (! $exists) {
+                                $isUnique = true;
+                            } else {
+                                // On the rare chance of collision, add more randomness
+                                $attempts++;
+                                $finalSlug = $uniqueSlug.'_'.Str::random(8);
+                            }
+                        }
+
+                        // If we still have a collision after 10 attempts (extremely unlikely),
+                        // generate a completely random slug
+                        if (! $isUnique) {
+                            $finalSlug = 'campaign_'.$tenantPrefix.'_'.
+                                         $timestamp.$microseconds.'_'.
+                                         Str::random(16);
+                        }
+
+                        // Lock the row during creation to prevent race conditions
+                        $campaign = DB::transaction(function () use ($finalSlug, $fileName, $providerId, $data, $licenseSevice) {
+                            // Prepare campaign data
+                            $campaignData = [
+                                'tenant_id' => $this->tenantId,
+                                'provider_id' => $providerId,
+                                'slug' => $finalSlug,
+                                'name' => $fileName,
+                                'start_time' => $data['start_time'] ?? now()->format('Y-m-d H:i:s'),
+                                'end_time' => $data['end_time'] ?? now()->addHours(1)->format('Y-m-d H:i:s'),
+                                'campaign_type' => 'dialer',
+                            ];
+
+                            // Check if batch_id column exists before adding it
+                            if (Schema::hasColumn('campaigns', 'batch_id')) {
+                                $campaignData['batch_id'] = $this->batchId;
+                            }
+
+                            if ($licenseSevice->validCampaignsCount($this->tenantId)) {
+                                // Create campaign with a lock to prevent concurrent creation
+                            $campaign = Campaign::create($campaignData);
+                            return $campaign;
+                            } else {
+                                Log::error("Tenant {$this->tenantId}: License validation failed. Cannot process CSV import.");
+                            }
+                           
+
+                            
+                        }, 5); // 5 retries if deadlock occurs
+
+                        Log::info("Tenant {$this->tenantId}: Created new campaign: {$fileName} with slug: {$finalSlug}, ID: {$campaign->id}, batch: {$this->batchId}");
                         $campaignCache[$campaignKey] = $campaign->id;
                     } catch (\Exception $e) {
-                        Log::error("Tenant {$this->tenantId}: Error creating campaign {$fileName}: " . $e->getMessage());
+                        Log::error("Tenant {$this->tenantId}: Error creating campaign {$fileName}: ".$e->getMessage());
                         throw $e; // Re-throw to ensure the row is skipped properly
                     }
                 }
+
                 $campaignId = $campaignCache[$campaignKey];
 
                 // Generate slug for the contact
-                $contactSlug = Str::slug($fileName . '-' . $data['phone_number']);
+                // Generate a unique slug for the contact using file name, phone number, campaign ID, and a random string
+                $contactSlug = Str::slug($fileName.'-'.$data['phone_number'].'-'.$campaignId.'-'.Str::random(8));
 
                 // Clean and standardize the phone number by removing all non-digit characters
                 $cleanPhoneNumber = preg_replace('/[^0-9]/', '', $data['phone_number']);
@@ -381,6 +444,7 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                         $data
                     );
                     $skippedCount++;
+
                     continue;
                 }
 
@@ -400,7 +464,7 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                     $contactsData = [];
                 }
             } catch (\Exception $e) {
-                Log::error("Tenant {$this->tenantId}: Error processing row {$rowNumber}: " . $e->getMessage());
+                Log::error("Tenant {$this->tenantId}: Error processing row {$rowNumber}: ".$e->getMessage());
 
                 // Track skipped row with processing error
                 try {
@@ -408,20 +472,20 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                         $data['phone_number'] ?? 'unknown',
                         $providerId ?? null,
                         $campaignId ?? null,
-                        'processing_error: ' . class_basename($e),
+                        'processing_error: '.class_basename($e),
                         $fileName ?? null,
                         $rowNumber,
                         $data ?? []
                     );
                 } catch (\Exception $saveEx) {
-                    Log::error("Tenant {$this->tenantId}: Error saving skipped number: " . $saveEx->getMessage());
+                    Log::error("Tenant {$this->tenantId}: Error saving skipped number: ".$saveEx->getMessage());
                 }
 
                 $skippedCount++;
             }
         }
 
-        if (!empty($contactsData)) {
+        if (! empty($contactsData)) {
             $this->insertContacts($contactsData);
             $processedCount += count($contactsData);
             $this->updateProgress($processedCount);
@@ -462,8 +526,9 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
             }
         } catch (\Exception $e) {
             // Just log the error but don't fail the job since data has been processed
-            Log::error("Tenant {$this->tenantId}: Error during final verification: " . $e->getMessage());
+            Log::error("Tenant {$this->tenantId}: Error during final verification: ".$e->getMessage());
         }
+
     }
 
     /**
@@ -484,16 +549,16 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
 
             if ($validCampaigns !== count($campaignIds)) {
                 Log::error("Tenant {$this->tenantId}: Tenant mismatch detected during contact insert. Expected tenant: {$this->tenantId}, valid campaigns: {$validCampaigns}");
-                throw new \Exception("Tenant security validation failed");
+                throw new \Exception('Tenant security validation failed');
             }
 
             DB::table('contacts')->insert($contacts);
             DB::commit();
 
-            Log::info("Tenant {$this->tenantId}: Successfully inserted " . count($contacts) . " contacts");
+            Log::info("Tenant {$this->tenantId}: Successfully inserted ".count($contacts).' contacts');
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Tenant {$this->tenantId}: Error inserting contacts: " . $e->getMessage());
+            Log::error("Tenant {$this->tenantId}: Error inserting contacts: ".$e->getMessage());
             throw $e; // Re-throw to allow proper error handling
         }
     }
@@ -501,7 +566,7 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
     /**
      * Save a skipped phone number to the database
      */
-    protected function saveSkippedNumber(string $phoneNumber, ?int $providerId, ?int $campaignId, string $skipReason, ?string $fileName, int $rowNumber, array $rawData = null)
+    protected function saveSkippedNumber(string $phoneNumber, ?int $providerId, ?int $campaignId, string $skipReason, ?string $fileName, int $rowNumber, ?array $rawData = null)
     {
         try {
             SkippedNumber::create([
@@ -516,7 +581,7 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                 'raw_data' => $rawData,
             ]);
         } catch (\Exception $e) {
-            Log::error("Tenant {$this->tenantId}: Error saving skipped number: " . $e->getMessage());
+            Log::error("Tenant {$this->tenantId}: Error saving skipped number: ".$e->getMessage());
         }
     }
 

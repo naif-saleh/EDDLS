@@ -116,14 +116,62 @@ class Campaign extends Model
             ->toArray();
     }
 
+       /**
+     * Boot the model.
+     *
+     * @return void
+     */
     protected static function booted()
     {
         static::creating(function ($campaign) {
-            $campaign->slug = Str::slug($campaign->name);
+            // Skip if slug is already set
+            if (!empty($campaign->slug)) {
+                return;
+            }
+
+            // Generate a unique slug
+            $baseSlug = Str::slug($campaign->name);
+
+            // Handle empty slugs (non-latin characters)
+            if (empty($baseSlug)) {
+                $baseSlug = 'campaign-' . substr(md5($campaign->name), 0, 8);
+            }
+
+            // Add unique identifiers
+            $timestamp = now()->format('YmdHis');
+            $microseconds = sprintf('%06d', now()->microsecond);
+            $uniqueId = Str::uuid()->toString();
+            $tenantPrefix = $campaign->tenant_id ? substr(md5($campaign->tenant_id), 0, 6) : 'notenant';
+
+            // Combine for uniqueness
+            $uniqueSlug = $tenantPrefix . '_' .
+                          $baseSlug . '_' .
+                          $timestamp .
+                          $microseconds . '_' .
+                          substr($uniqueId, 0, 8);
+
+            // Check length and truncate if needed
+            if (strlen($uniqueSlug) > 190) {
+                $uniqueSlug = $tenantPrefix . '_' .
+                              substr(md5($baseSlug), 0, 8) . '_' .
+                              $timestamp .
+                              $microseconds . '_' .
+                              substr($uniqueId, 0, 8);
+            }
+
+            // Set the slug
+            $campaign->slug = $uniqueSlug;
+
+            // Double-check for uniqueness (extra safety)
+            $exists = static::where('slug', $uniqueSlug)->exists();
+            if ($exists) {
+                // If collision happened (extremely unlikely), add more randomness
+                $campaign->slug = $uniqueSlug . '_' . Str::random(8);
+            }
         });
     }
 
-     public function updateCampaignStatus()
+    public function updateCampaignStatus()
     {
         // Get contact status counts
         $statusCounts = $this->contacts()
@@ -162,8 +210,8 @@ class Campaign extends Model
 
         // All contacts processed or unreachable
         if (
-            (isset($statusCounts['answer']) || isset($statusCounts['no_answer'])) &&
-            ($statusCounts['answer'] + $statusCounts['no_answer'] ?? 0) === $totalContacts
+            (isset($statusCounts['Talking']) || isset($statusCounts['Routing'])) &&
+            ($statusCounts['Talking'] + $statusCounts['Routing'] ?? 0) === $totalContacts
         ) {
             return 'processed';
         }

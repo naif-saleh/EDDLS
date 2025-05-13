@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('contacts', function (Blueprint $table) {
             $table->id();
             $table->string('slug');
-            $table->string('call_id')->default(null); // Unique identifier for the call
+            $table->string('call_id')->default('null'); // Unique identifier for the call
 
             $table->boolean('is_ready_calling')->default(false);
             $table->foreignId('campaign_id')->constrained()->onDelete('cascade');

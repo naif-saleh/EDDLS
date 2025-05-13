@@ -7,9 +7,10 @@ use App\Models\Campaign;
 use App\Models\Contact;
 use App\Models\Provider;
 use App\Models\Tenant;
+use App\Services\CampaignStatusService;
+use App\Services\LicenseService;
 use App\Services\ThreeCXIntegrationService;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class DialerMakeCallCommand extends Command
@@ -92,14 +93,6 @@ class DialerMakeCallCommand extends Command
         $tenantsProcessed = 0;
 
         foreach ($tenants as $tenant) {
-            $lockKey = "dialer_lock_tenant_{$tenant->id}";
-
-            // Try to acquire a lock for this tenant
-            if (! Cache::add($lockKey, true, $this->lockTimeout)) {
-                Log::info("⏳ Tenant {$tenant->name} (ID: {$tenant->id}) is already being processed by another job");
-
-                continue;
-            }
 
             try {
                 Log::info("Processing tenant: {$tenant->name} (ID: {$tenant->id})");
@@ -116,9 +109,6 @@ class DialerMakeCallCommand extends Command
                     'tenant_id' => $tenant->id,
                     'exception' => $e,
                 ]);
-            } finally {
-                // Release the lock
-                Cache::forget($lockKey);
             }
         }
 
@@ -136,11 +126,12 @@ class DialerMakeCallCommand extends Command
     {
         $processed = 0;
         $callsMade = 0;
+        $campaignStatusService = new CampaignStatusService;
 
         // Load active campaigns for this tenant
         $campaigns = Campaign::where('tenant_id', $tenant->id)
             ->where('allow', true)
-            ->where('status', 'not_start')
+            ->whereDate('created_at', \Carbon\Carbon::today())
             ->whereBetween('start_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
             ->whereBetween('end_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
             ->get();
@@ -173,6 +164,18 @@ class DialerMakeCallCommand extends Command
 
             Log::info("Processing campaign: {$campaign->name} with provider: {$provider->name}");
 
+            // Update campaign status to 'calling' if it has contacts to process
+            $contactsToProcess = Contact::where('campaign_id', $campaign->id)
+                ->where('status', 'new')
+                ->underMaxAttempts(3)
+                ->count();
+
+            if ($contactsToProcess > 0) {
+                $campaign->status = 'calling';
+                $campaign->save();
+                Log::info("Campaign {$campaign->name} status set to 'calling'");
+            }
+
             // Initialize the 3CX service for this tenant
             $threeCxService = new ThreeCXIntegrationService($tenant->id);
 
@@ -181,14 +184,11 @@ class DialerMakeCallCommand extends Command
             $callId = null;
             $callStatus = null;
 
-            // Fix: Change 'Value' to 'value' to match actual API response structure
             if (isset($activeCallsResponse['value']) && ! empty($activeCallsResponse['value'])) {
                 // Extract the first active call information
                 $activeCall = $activeCallsResponse['value'][0];
                 $callId = $activeCall['Id'] ?? null;
                 $callStatus = $activeCall['Status'] ?? null;
-
-                // Log the extracted values
                 Log::info("Active call found - Call ID: {$callId}, Status: {$callStatus}");
             }
 
@@ -201,6 +201,9 @@ class DialerMakeCallCommand extends Command
 
             if ($contacts->isEmpty()) {
                 Log::info("No contacts to process for campaign {$campaign->name}");
+
+                // Update campaign status if there are no new contacts
+                $campaignStatusService->updateSingleCampaignStatus($campaign);
 
                 continue;
             }
@@ -221,11 +224,16 @@ class DialerMakeCallCommand extends Command
                     $contact->markAsCalling();
                     $campaignProcessed++;
 
-                    // Make the actual call
-                    $callResponse = $threeCxService->makeCall($provider->extension, $contact->phone_number);
+                    $licenseSevice = new LicenseService;
+                     if ($licenseSevice->validDialCallsCount($tenant->id)) {
+                                  // Make the actual call
+                    $threeCxService->makeCall($provider->extension, $contact->phone_number);
+                            } else {
+                                Log::error("Tenant {$tenant->name}: License validation failed. Make Calls.");
+                            }
+                  
 
                     // Check if we need to refresh the active calls to get the latest call ID
-                    // You may need this if the callId isn't set from the earlier check
                     if (! $callId) {
                         $refreshCallsResponse = $threeCxService->getActiveCallsForProvider($provider->extension);
                         if (isset($refreshCallsResponse['value']) && ! empty($refreshCallsResponse['value'])) {
@@ -236,30 +244,33 @@ class DialerMakeCallCommand extends Command
                         }
                     }
 
-                    // Log call details - now using the updated callId and callStatus
-                    $callLog = CallLog::updateOrCreate(
-                        [
-                            'call_id' => $callId ?? 0,
-                        ],
-                        [
-                            'campaign_id' => $campaign->id,
-                            'provider_id' => $provider->id,
-                            'contact_id' => $contact->id,
-                            'call_status' => $callStatus ?? 'initiated',
-                            'call_type' => 'dialer',
-                            'called_at' => now(),
-                        ]
-                    );
+                    // Log call details
+                    $callLog = CallLog::create([
+                        'call_id' => $callId ?? 0,
+                        'campaign_id' => $campaign->id,
+                        'provider_id' => $provider->id,
+                        'contact_id' => $contact->id,
+                        'call_status' => $callStatus ?? 'initiated',
+                        'call_type' => 'dialer',
+                        'called_at' => now(),
+                    ]);
 
-                    // Log the CallLog update
                     Log::info("CallLog created/updated with Call ID: {$callId}, Status: {$callStatus}");
 
                     $campaignCalls++;
-                    $campaign->updateAllCampaignStatuses();
+
+                    // Update campaign status after each call
+                    $campaignStatusService->updateSingleCampaignStatus($campaign);
+
                     Log::info("Call initiated: {$contact->phone_number} for tenant {$tenant->id}, campaign {$campaign->id}");
 
                     // Add delay between calls for rate limiting
                     usleep($this->callDelay);
+
+                    // Count towards overall totals
+                    $processed++;
+                    $callsMade++;
+
                 } catch (\Exception $e) {
                     // Handle call failure
                     $contact->completeCall('failed');
@@ -269,10 +280,16 @@ class DialerMakeCallCommand extends Command
                         'contact_id' => $contact->id,
                         'exception' => $e,
                     ]);
+
+                    // Update campaign status after failed call
+                    $campaignStatusService->updateSingleCampaignStatus($campaign);
                 }
             }
 
             Log::info("Campaign {$campaign->name}: {$campaignProcessed} contacts processed, {$campaignCalls} calls made");
+
+            // Final status update after all contacts are processed
+            $campaignStatusService->updateSingleCampaignStatus($campaign);
         }
 
         return [

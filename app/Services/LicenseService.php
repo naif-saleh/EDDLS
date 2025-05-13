@@ -23,13 +23,23 @@ class LicenseService
     /**
      * Get the active license for a tenant
      *
-     * @param int|null $tenantId
+     * @param  int|null  $tenantId
      * @return License|null
      */
-    public function getActiveLicense($tenantId = null)
+    public function getActiveLicense($tenantId = null, $skipCache = false)
     {
         $tenantId = $tenantId ?? auth()->user()->tenant_id;
         $cacheKey = "tenant_{$tenantId}_active_license";
+
+        // Skip cache if requested (for write operations)
+        if ($skipCache) {
+            return License::where('tenant_id', $tenantId)
+                ->where('is_active', true)
+                ->where('valid_from', '<=', now())
+                ->where('valid_until', '>=', now())
+                ->orderBy('valid_until', 'desc')
+                ->first();
+        }
 
         return Cache::remember($cacheKey, now()->addMinutes(self::CACHE_TTL), function () use ($tenantId) {
             return License::where('tenant_id', $tenantId)
@@ -41,10 +51,178 @@ class LicenseService
         });
     }
 
+     /**
+     * Check validProvidersCount
+     *
+     * @param  int|null  $tenantId
+     * @return bool
+     */
+    public function validProvidersCount($tenantId = null)
+    {
+        // Get fresh license without cache for modification
+        $license = $this->getActiveLicense($tenantId, true);
+
+        if (! $license) {
+            return false;
+        }
+
+        $tenantId = $tenantId ?? auth()->user()->tenant_id;
+        $tenant = Tenant::find($tenantId);
+
+        if (! $tenant) {
+            return false;
+        }
+
+        if ($license->max_providers <= 0) {
+            Log::info('License max providers limit reached');
+
+            return false;
+        }
+
+        // Modify and save the license
+        $license->max_providers--;
+        $license->save();
+
+        // Clear the cache to ensure subsequent reads get the updated value
+        $cacheKey = "tenant_{$tenantId}_active_license";
+        Cache::forget($cacheKey);
+
+        Log::info('License max providers limit decreased to '.$license->max_providers);
+
+        return true;
+    }
+
+
+     /**
+     * Check validAgentsCount
+     *
+     * @param  int|null  $tenantId
+     * @return bool
+     */
+
+    public function validAgentsCount($tenantId = null)
+    {
+        // Get fresh license without cache for modification
+        $license = $this->getActiveLicense($tenantId, true);
+
+        if (! $license) {
+            return false;
+        }
+
+        $tenantId = $tenantId ?? auth()->user()->tenant_id;
+        $tenant = Tenant::find($tenantId);
+
+        if (! $tenant) {
+            return false;
+        }
+
+        if ($license->max_agents <= 0) {
+            Log::info('License max agents limit reached');
+
+            return false;
+        }
+
+        // Modify and save the license
+        $license->max_agents--;
+        $license->save();
+
+        // Clear the cache to ensure subsequent reads get the updated value
+        $cacheKey = "tenant_{$tenantId}_active_license";
+        Cache::forget($cacheKey);
+
+        Log::info('License max providers limit decreased to '.$license->max_agents);
+
+        return true;
+    }
+
+
+    /**
+     * Check validCampaignsCount
+     *
+     * @param  int|null  $tenantId
+     * @return bool
+     */
+    public function validCampaignsCount($tenantId = null)
+    {
+        // Get fresh license without cache for modification
+        $license = $this->getActiveLicense($tenantId, true);
+
+        if (! $license) {
+            return false;
+        }
+
+        $tenantId = $tenantId ?? auth()->user()->tenant_id;
+        $tenant = Tenant::find($tenantId);
+
+        if (! $tenant) {
+            return false;
+        }
+
+        if ($license->max_campaigns <= 0) {
+            Log::info('License max campaigns limit reached');
+
+            return false;
+        }
+
+        // Modify and save the license
+        $license->max_campaigns--;
+        $license->save();
+
+        // Clear the cache to ensure subsequent reads get the updated value
+        $cacheKey = "tenant_{$tenantId}_active_license";
+        Cache::forget($cacheKey);
+
+        Log::info('License max campaigns limit decreased to '.$license->max_campaigns);
+
+        return true;
+    }
+
+
+    /**
+     * Check validCampaignsCount
+     *
+     * @param  int|null  $tenantId
+     * @return bool
+     */
+    public function validDialCallsCount($tenantId = null)
+    {
+        // Get fresh license without cache for modification
+        $license = $this->getActiveLicense($tenantId, true);
+
+        if (! $license) {
+            return false;
+        }
+
+        $tenantId = $tenantId ?? auth()->user()->tenant_id;
+        $tenant = Tenant::find($tenantId);
+
+        if (! $tenant) {
+            return false;
+        }
+
+        if ($license->max_dial_calls <= 0) {
+            Log::info('License max campaigns limit reached');
+
+            return false;
+        }
+
+        // Modify and save the license
+        $license->max_dial_calls--;
+        $license->save();
+
+        // Clear the cache to ensure subsequent reads get the updated value
+        $cacheKey = "tenant_{$tenantId}_active_license";
+        Cache::forget($cacheKey);
+
+        Log::info('License max Dial Calls limit decreased to '.$license->max_dial_calls);
+
+        return true;
+    }
+
     /**
      * Check if a tenant has a valid license
      *
-     * @param int|null $tenantId
+     * @param  int|null  $tenantId
      * @return bool
      */
     public function hasValidLicense($tenantId = null)
@@ -55,14 +233,14 @@ class LicenseService
     /**
      * Check if tenant has reached the campaign limit
      *
-     * @param int|null $tenantId
+     * @param  int|null  $tenantId
      * @return bool
      */
     public function hasReachedCampaignLimit($tenantId = null)
     {
         $license = $this->getActiveLicense($tenantId);
 
-        if (!$license) {
+        if (! $license) {
             return true; // No license means limit is reached
         }
 
@@ -72,14 +250,14 @@ class LicenseService
     /**
      * Check if tenant has reached the agent limit
      *
-     * @param int|null $tenantId
+     * @param  int|null  $tenantId
      * @return bool
      */
     public function hasReachedAgentLimit($tenantId = null)
     {
         $license = $this->getActiveLicense($tenantId);
 
-        if (!$license) {
+        if (! $license) {
             return true; // No license means limit is reached
         }
 
@@ -89,14 +267,14 @@ class LicenseService
     /**
      * Check if tenant has reached the provider limit
      *
-     * @param int|null $tenantId
+     * @param  int|null  $tenantId
      * @return bool
      */
     public function hasReachedProviderLimit($tenantId = null)
     {
         $license = $this->getActiveLicense($tenantId);
 
-        if (!$license) {
+        if (! $license) {
             return true; // No license means limit is reached
         }
 
@@ -106,22 +284,22 @@ class LicenseService
     /**
      * Get remaining quota for a specific resource
      *
-     * @param string $resource
-     * @param int|null $tenantId
+     * @param  string  $resource
+     * @param  int|null  $tenantId
      * @return int|null
      */
     public function getRemainingQuota($resource, $tenantId = null)
     {
         $license = $this->getActiveLicense($tenantId);
 
-        if (!$license) {
+        if (! $license) {
             return 0;
         }
 
         $tenantId = $tenantId ?? auth()->user()->tenant_id;
         $tenant = Tenant::find($tenantId);
 
-        if (!$tenant) {
+        if (! $tenant) {
             return null;
         }
 
@@ -144,38 +322,39 @@ class LicenseService
     /**
      * Check if license is expiring soon
      *
-     * @param int|null $tenantId
+     * @param  int|null  $tenantId
      * @return bool
      */
     public function isExpiringSoon($tenantId = null)
     {
         $license = $this->getActiveLicense($tenantId);
 
-        if (!$license) {
+        if (! $license) {
             return false;
         }
 
         $daysRemaining = $license->getDaysRemaining();
+
         return $daysRemaining >= 0 && $daysRemaining <= self::EXPIRATION_WARNING_DAYS;
     }
 
     /**
      * Get expiration status information
      *
-     * @param int|null $tenantId
+     * @param  int|null  $tenantId
      * @return array
      */
     public function getExpirationStatus($tenantId = null)
     {
         $license = $this->getActiveLicense($tenantId);
 
-        if (!$license) {
+        if (! $license) {
             return [
                 'has_license' => false,
                 'is_valid' => false,
                 'days_remaining' => 0,
                 'expiring_soon' => false,
-                'expired' => true
+                'expired' => true,
             ];
         }
 
@@ -187,34 +366,34 @@ class LicenseService
             'days_remaining' => max(0, $daysRemaining),
             'expiring_soon' => $daysRemaining >= 0 && $daysRemaining <= self::EXPIRATION_WARNING_DAYS,
             'expired' => $daysRemaining < 0,
-            'valid_until' => $license->valid_until->format('Y-m-d')
+            'valid_until' => $license->valid_until->format('Y-m-d'),
         ];
     }
 
     /**
      * Get license usage statistics
      *
-     * @param int|null $tenantId
+     * @param  int|null  $tenantId
      * @return array
      */
     public function getLicenseUsage($tenantId = null)
     {
         $license = $this->getActiveLicense($tenantId);
 
-        if (!$license) {
+        if (! $license) {
             return [
                 'has_license' => false,
-                'usage' => []
+                'usage' => [],
             ];
         }
 
         $tenantId = $tenantId ?? auth()->user()->tenant_id;
         $tenant = Tenant::find($tenantId);
 
-        if (!$tenant) {
+        if (! $tenant) {
             return [
                 'has_license' => true,
-                'usage' => []
+                'usage' => [],
             ];
         }
 
@@ -230,37 +409,37 @@ class LicenseService
                 'campaigns' => [
                     'used' => $campaignCount,
                     'limit' => $license->max_campaigns,
-                    'percentage' => $this->calculatePercentage($campaignCount, $license->max_campaigns)
+                    'percentage' => $this->calculatePercentage($campaignCount, $license->max_campaigns),
                 ],
                 'agents' => [
                     'used' => $agentCount,
                     'limit' => $license->max_agents,
-                    'percentage' => $this->calculatePercentage($agentCount, $license->max_agents)
+                    'percentage' => $this->calculatePercentage($agentCount, $license->max_agents),
                 ],
                 'providers' => [
                     'used' => $providerCount,
                     'limit' => $license->max_providers,
-                    'percentage' => $this->calculatePercentage($providerCount, $license->max_providers)
+                    'percentage' => $this->calculatePercentage($providerCount, $license->max_providers),
                 ],
                 'dist_calls' => [
                     'used' => $distCallCount,
                     'limit' => $license->max_dist_calls,
-                    'percentage' => $this->calculatePercentage($distCallCount, $license->max_dist_calls)
+                    'percentage' => $this->calculatePercentage($distCallCount, $license->max_dist_calls),
                 ],
                 'dial_calls' => [
                     'used' => $dialCallCount,
                     'limit' => $license->max_dial_calls,
-                    'percentage' => $this->calculatePercentage($dialCallCount, $license->max_dial_calls)
-                ]
-            ]
+                    'percentage' => $this->calculatePercentage($dialCallCount, $license->max_dial_calls),
+                ],
+            ],
         ];
     }
 
     /**
      * Calculate percentage usage
      *
-     * @param int $used
-     * @param int $limit
+     * @param  int  $used
+     * @param  int  $limit
      * @return float
      */
     protected function calculatePercentage($used, $limit)
@@ -275,8 +454,8 @@ class LicenseService
     /**
      * Validate a license key
      *
-     * @param string $licenseKey
-     * @param int|null $tenantId
+     * @param  string  $licenseKey
+     * @param  int|null  $tenantId
      * @return array
      */
     public function validateLicenseKey($licenseKey, $tenantId = null)
@@ -288,44 +467,45 @@ class LicenseService
             ->where('tenant_id', $tenantId)
             ->first();
 
-        if (!$license) {
+        if (! $license) {
             Log::warning("Invalid license key attempted: {$licenseKey} for tenant {$tenantId}");
+
             return [
                 'valid' => false,
-                'message' => 'License key not found'
+                'message' => 'License key not found',
             ];
         }
 
         // Check if license date is valid
-        if (!Carbon::now()->between($license->valid_from, $license->valid_until)) {
+        if (! Carbon::now()->between($license->valid_from, $license->valid_until)) {
             return [
                 'valid' => false,
                 'message' => 'License key has expired or is not yet valid',
                 'valid_from' => $license->valid_from->format('Y-m-d'),
-                'valid_until' => $license->valid_until->format('Y-m-d')
+                'valid_until' => $license->valid_until->format('Y-m-d'),
             ];
         }
 
         // Check if license is active
-        if (!$license->is_active) {
+        if (! $license->is_active) {
             return [
                 'valid' => false,
-                'message' => 'License key is inactive'
+                'message' => 'License key is inactive',
             ];
         }
 
         return [
             'valid' => true,
             'message' => 'License key is valid',
-            'license' => $license
+            'license' => $license,
         ];
     }
 
     /**
      * Activate a license for a tenant
      *
-     * @param string $licenseKey
-     * @param int|null $tenantId
+     * @param  string  $licenseKey
+     * @param  int|null  $tenantId
      * @return array
      */
     public function activateLicense($licenseKey, $tenantId = null)
@@ -335,7 +515,7 @@ class LicenseService
         // First, validate the license key
         $validation = $this->validateLicenseKey($licenseKey, $tenantId);
 
-        if (!$validation['valid']) {
+        if (! $validation['valid']) {
             return $validation;
         }
 
@@ -348,7 +528,7 @@ class LicenseService
             ->update(['is_active' => false]);
 
         // Activate this license if it's not already active
-        if (!$license->is_active) {
+        if (! $license->is_active) {
             $license->is_active = true;
             $license->save();
         }
@@ -361,14 +541,14 @@ class LicenseService
         return [
             'valid' => true,
             'message' => 'License activated successfully',
-            'license' => $license
+            'license' => $license,
         ];
     }
 
     /**
      * Clear license cache for a tenant
      *
-     * @param int|null $tenantId
+     * @param  int|null  $tenantId
      * @return void
      */
     public function clearLicenseCache($tenantId = null)
@@ -380,7 +560,6 @@ class LicenseService
     /**
      * Create a new license for a tenant
      *
-     * @param array $data
      * @return License
      */
     public function createLicense(array $data)
@@ -398,15 +577,14 @@ class LicenseService
     /**
      * Update an existing license
      *
-     * @param int $licenseId
-     * @param array $data
+     * @param  int  $licenseId
      * @return License|null
      */
     public function updateLicense($licenseId, array $data)
     {
         $license = License::find($licenseId);
 
-        if (!$license) {
+        if (! $license) {
             return null;
         }
 
@@ -423,14 +601,14 @@ class LicenseService
     /**
      * Deactivate a license
      *
-     * @param int $licenseId
+     * @param  int  $licenseId
      * @return License|null
      */
     public function deactivateLicense($licenseId)
     {
         $license = License::find($licenseId);
 
-        if (!$license) {
+        if (! $license) {
             return null;
         }
 
@@ -457,10 +635,10 @@ class LicenseService
             strtoupper(substr(md5(microtime()), 0, 5)),
             strtoupper(substr(md5(rand()), 0, 5)),
             strtoupper(substr(md5(uniqid()), 0, 5)),
-            strtoupper(substr(md5(time()), 0, 5))
+            strtoupper(substr(md5(time()), 0, 5)),
         ];
 
-        $licenseKey = $prefix . implode('-', $segments);
+        $licenseKey = $prefix.implode('-', $segments);
 
         // Make sure this key doesn't already exist
         while (License::where('license_key', $licenseKey)->exists()) {
@@ -468,10 +646,10 @@ class LicenseService
                 strtoupper(substr(md5(microtime()), 0, 5)),
                 strtoupper(substr(md5(rand()), 0, 5)),
                 strtoupper(substr(md5(uniqid()), 0, 5)),
-                strtoupper(substr(md5(time()), 0, 5))
+                strtoupper(substr(md5(time()), 0, 5)),
             ];
 
-            $licenseKey = $prefix . implode('-', $segments);
+            $licenseKey = $prefix.implode('-', $segments);
         }
 
         return $licenseKey;

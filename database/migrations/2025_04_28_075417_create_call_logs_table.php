@@ -17,7 +17,7 @@ return new class extends Migration
             $table->foreignId('campaign_id')->constrained()->onDelete('cascade');
             $table->foreignId('provider_id')->constrained()->onDelete('cascade');
             $table->foreignId('agent_id')->nullable()->constrained()->onDelete('set null');
-            $table->string('call_id'); // Unique identifier for the call
+            $table->string('call_id')->default('null'); // Unique identifier for the call
             $table->string('call_type');
             $table->integer('talking_duration')->default(0); // in seconds
             $table->integer('dial_duration')->default(0); // in seconds
