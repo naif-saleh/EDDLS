@@ -1,6 +1,6 @@
 @php
 $sidebar_type = 'sidebar';
-if(Auth::user()->isSuperAdmin()){
+if(Auth::check() && Auth::user()->isSuperAdmin()){
 $sidebar_type = 'admin-sidebar';
 }
 @endphp

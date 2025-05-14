@@ -195,7 +195,7 @@ class ProvidersList extends Component
     public function render()
     {
         // Initialize provider query
-        $query = Provider::query();
+        $query = Provider::query()->where('tenant_id', auth()->user()->tenant->id);
 
         // Apply search if provided
         if ($this->search) {
@@ -205,7 +205,7 @@ class ProvidersList extends Component
         }
 
         // Filter providers by the current user's tenant
-        $query->where('tenant_id', auth()->user()->tenant->id)
+        $query
             ->orderBy($this->sortField, $this->sortDirection);
 
         // Get providers with pagination

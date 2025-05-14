@@ -4,12 +4,14 @@ namespace App\Livewire\Systems\Distributor;
 
 use App\Jobs\SyncronizeAgentsFromPbxJob;
 use App\Models\Agent;
+use App\Models\License;
 use App\Models\Tenant;
+use App\Services\LicenseService;
 use App\Services\ThreeCXIntegrationService;
+use App\Services\ThreeCxTokenService;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Masmerise\Toaster\Toaster;
-use App\Services\ThreeCxTokenService;
 
 class AgentList extends Component
 {
@@ -41,17 +43,25 @@ class AgentList extends Component
 
     public $tenant_id;
 
+    public $licenseSevice;
+
     public function mount()
     {
         $this->tenant_id = auth()->user()->tenant_id;
-
+        // dd($this->tenant_id);
         // Initialize services with the tenant ID
         $threeCxToken = new ThreeCxTokenService($this->tenant_id);
-        $three_cxintegration_service = new ThreeCXIntegrationService($threeCxToken, $this->tenant_id);
+        $three_cxintegration_service = new ThreeCXIntegrationService($this->tenant_id, $threeCxToken);
 
         // Get token and users data for the tenant
         $this->tokenValue = $threeCxToken->getToken();
         $this->three_cxintegration_service_value = $three_cxintegration_service->getUsersFromThreeCxApi();
+
+    }
+
+    protected function getLicenseService()
+    {
+        return new LicenseService;
     }
 
     // Syncronize Agents From 3CX PBX
@@ -81,38 +91,52 @@ class AgentList extends Component
         }
     }
 
-     // Toggle to activate or disactivate agent
-     public function toggleAgentStatus($id, $isChecked)
-     {
-         $agent = Agent::find($id);
+    // Toggle to activate or disactivate agent
+    public function toggleAgentStatus($id, $isChecked)
+    {
+        $agent = Agent::find($id);
 
-         if (! $agent) {
-             Toaster::error('agent not found.');
+        if (! $agent) {
+            Toaster::error('Agent not found.');
+            return;
+        }
 
-             return;
-         }
+        $licenseService = $this->getLicenseService();
 
-         $agent->update([
-             'status' => $isChecked ? 'active' : 'inactive',
-         ]);
+        if ($isChecked) {
+            // Activating agent: check license limit before activating
+            if (! $licenseService->validAgentsCount($this->tenant_id)) {
+                Toaster::warning('License Agents limit reached. Please contact support.');
+                $this->dispatch('revertCheckbox', agentId: $id, currentStatus: $agent->status === 'active');
+                return;
+            }
+            $agent->update(['status' => 'active']);
+        } else {
+            // Deactivating agent: decrement count
+            $licenseService->incrementAgentsCount($this->tenant_id);
+            $agent->update(['status' => 'inactive']);
+        }
 
-         Toaster::success('agent status updated successfully.');
-     }
+        Toaster::success('Agent status updated successfully.');
+    }
 
     public function render()
     {
-        $query = Agent::query();
+        $query = Agent::query()->where('tenant_id', $this->tenant_id);
         if ($this->search) {
             $query->where('name', 'like', '%'.$this->search.'%')
                 ->orWhere('extension', 'like', '%'.$this->search.'%')
                 ->orWhere('status', 'like', '%'.$this->search.'%')
                 ->orderBy($this->sortField, $this->sortDirection);
         }
-        $query->where('tenant_id', $this->tenant_id)->orderBy($this->sortField, $this->sortDirection);
+        $query->orderBy($this->sortField, $this->sortDirection);
         $agents = $query->paginate($this->perPage);
 
+        $license = License::where('tenant_id', $this->tenant_id)->first();
+
         return view('livewire.systems.distributor.agent-list', [
-            'agents' => $agents
+            'agents' => $agents,
+            'license' => $license
         ]);
     }
 }

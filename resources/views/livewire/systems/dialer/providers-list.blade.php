@@ -7,43 +7,89 @@
                 <div
                     class="bg-white border border-gray-200 rounded-xl shadow-2xs overflow-hidden dark:bg-neutral-900 dark:border-neutral-700">
                     <!-- Header -->
-                    <div
-                        class="px-6 py-4 grid gap-3 md:flex md:justify-between md:items-center border-b border-gray-200 dark:border-neutral-700">
-                        <div>
-                            <h2 class="text-xl font-semibold text-gray-800 dark:text-neutral-200">
-                                Providers View
-                            </h2>
-                            <p class="text-sm text-gray-600 dark:text-neutral-400">
-                                Providers are individuals or entities that lease or rent properties or services.
-                            </p>
-                        </div>
+                    <div class="px-6 py-5 border-b border-gray-200 dark:border-neutral-700">
+                        <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+                            <!-- Left side: Title and description -->
+                            <div class="space-y-1 max-w-2xl">
+                                <h2 class="text-xl font-semibold text-gray-800 dark:text-neutral-200">
+                                    Providers View
+                                </h2>
+                                <p class="text-sm text-gray-600 dark:text-neutral-400">
+                                    Providers are individuals or entities that lease or rent properties or services.
+                                </p>
 
-                        <div>
-                            <div class="grid grid-cols-1 {{ Route::currentRouteName() === 'tenant.dialer.providers' ? 'sm:grid-cols-3' : 'sm:grid-cols-2' }} gap-4">
-                                <input type="text" wire:model.live='search'
-                                    class="py-2 px-3 block w-full border border-gray-300 dark:border-neutral-600 rounded-md text-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-neutral-900 dark:text-neutral-200 dark:placeholder-neutral-500 focus:outline-none"
-                                    placeholder="Search">
-                                <x-add-button :value='"Create New Provider"' />
-
-                                @if (Route::currentRouteName() === 'tenant.dialer.providers')
-                                <div>
-                                     <button
-                                        class="py-1.5 px-3 inline-flex items-center justify-center gap-x-1.5 text-sm font-medium rounded-md border border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-50 dark:bg-neutral-800 dark:text-neutral-200 dark:border-neutral-700 dark:hover:bg-neutral-700"
-                                        onclick="window.Livewire.dispatch('openContactUploadModal')">
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6">
-                                            <path fill-rule="evenodd" d="M5.625 1.5H9a3.75 3.75 0 0 1 3.75 3.75v1.875c0 1.036.84 1.875 1.875 1.875H16.5a3.75 3.75 0 0 1 3.75 3.75v7.875c0 1.035-.84 1.875-1.875 1.875H5.625a1.875 1.875 0 0 1-1.875-1.875V3.375c0-1.036.84-1.875 1.875-1.875ZM12.75 12a.75.75 0 0 0-1.5 0v2.25H9a.75.75 0 0 0 0 1.5h2.25V18a.75.75 0 0 0 1.5 0v-2.25H15a.75.75 0 0 0 0-1.5h-2.25V12Z" clip-rule="evenodd" />
-                                            <path d="M14.25 5.25a5.23 5.23 0 0 0-1.279-3.434 9.768 9.768 0 0 1 6.963 6.963A5.23 5.23 0 0 0 16.5 7.5h-1.875a.375.375 0 0 1-.375-.375V5.25Z" />
+                                <!-- License status badge -->
+                                <div class="mt-1">
+                                    @if ($license->max_providers > 0)
+                                    <span
+                                        class="inline-flex items-center gap-x-1.5 py-1 px-2.5 rounded-md text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                                        <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" width="16"
+                                            height="16" fill="currentColor" viewBox="0 0 16 16">
+                                            <path
+                                                d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z" />
                                         </svg>
-                                        Upload File
+                                        Valid License - {{ $license->max_providers }} Providers
+                                    </span>
+                                    @else
+                                    <span
+                                        class="inline-flex items-center gap-x-1.5 py-1 px-2.5 rounded-md text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                                        <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" width="16"
+                                            height="16" fill="currentColor" viewBox="0 0 16 16">
+                                            <path
+                                                d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z" />
+                                        </svg>
+                                        License Expired - {{ $license->max_providers }} Providers
+                                    </span>
+                                    @endif
+                                </div>
+                            </div>
+
+                            <!-- Right side: Actions -->
+                            <div class="flex-shrink-0">
+                                <div class="flex flex-col sm:flex-row gap-3">
+                                    <!-- Search input -->
+                                    <div class="relative">
+                                        <div
+                                            class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                                            <svg class="w-4 h-4 text-gray-500 dark:text-neutral-400"
+                                                xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                                                stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                            </svg>
+                                        </div>
+                                        <input type="text" wire:model.live='search'
+                                            class="py-2 pl-10 pr-3 block w-full border border-gray-300 dark:border-neutral-600 rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-neutral-800 dark:text-neutral-200 dark:placeholder-neutral-400 focus:outline-none"
+                                            placeholder="Search providers">
+                                    </div>
+
+                                    <!-- Create button -->
+                                    <x-add-button />
+
+                                    <!-- Upload button - conditionally rendered -->
+
+                                    <button type="button"
+                                        class="py-2 px-3 inline-flex items-center justify-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:bg-neutral-800 dark:text-neutral-200 dark:border-neutral-700 dark:hover:bg-neutral-700 dark:focus:ring-neutral-600"
+                                        onclick="window.Livewire.dispatch('openContactUploadModal')">
+                                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                            fill="currentColor">
+                                            <path fill-rule="evenodd"
+                                                d="M5.625 1.5H9a3.75 3.75 0 0 1 3.75 3.75v1.875c0 1.036.84 1.875 1.875 1.875H16.5a3.75 3.75 0 0 1 3.75 3.75v7.875c0 1.035-.84 1.875-1.875 1.875H5.625a1.875 1.875 0 0 1-1.875-1.875V3.375c0-1.036.84-1.875 1.875-1.875ZM12.75 12a.75.75 0 0 0-1.5 0v2.25H9a.75.75 0 0 0 0 1.5h2.25V18a.75.75 0 0 0 1.5 0v-2.25H15a.75.75 0 0 0 0-1.5h-2.25V12Z"
+                                                clip-rule="evenodd" />
+                                            <path
+                                                d="M14.25 5.25a5.23 5.23 0 0 0-1.279-3.434 9.768 9.768 0 0 1 6.963 6.963A5.23 5.23 0 0 0 16.5 7.5h-1.875a.375.375 0 0 1-.375-.375V5.25Z" />
+                                        </svg>
+
                                     </button>
 
-                                     @livewire('contact-upload-modal')
                                 </div>
-                                @endif
-
-                         </div>
+                            </div>
                         </div>
                     </div>
+
+
+                    @livewire('contact-upload-modal')
+
                     <!-- End Header -->
 
                     <!-- Table -->
@@ -221,7 +267,7 @@
                                                 role="menu" aria-orientation="vertical"
                                                 aria-labelledby="hs-table-dropdown-1">
                                                 <div class="py-2 first:pt-0 last:pb-0">
-                                                     <a href="{{ route('tenant.dialer.provider.campaigns.list', ['provider' => $provider->slug, 'tenant' => $provider->tenant->slug]) }}"
+                                                    <a href="{{ route('tenant.dialer.provider.campaigns.list', ['provider' => $provider->slug, 'tenant' => $provider->tenant->slug]) }}"
                                                         wire:navigate
                                                         class='flex items-center gap-x-3 py-2 px-3 rounded-lg text-sm text-gray-800 hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-300 dark:focus:bg-neutral-700 dark:focus:text-neutral-300"'>
                                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none"
@@ -233,11 +279,11 @@
                                                         Campaigns
                                                     </a>
 
-                                                     
 
 
 
-                                                     <a href="{{ route('tenant.dialer.provider.campaigns.create', ['provider' => $provider->slug, 'tenant' => $provider->tenant]) }}"
+
+                                                    <a href="{{ route('tenant.dialer.provider.campaigns.create', ['provider' => $provider->slug, 'tenant' => $provider->tenant]) }}"
                                                         wire:navigate
                                                         class='flex items-center gap-x-3 py-2 px-3 rounded-lg text-sm text-gray-800 hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-300 dark:focus:bg-neutral-700 dark:focus:text-neutral-300"'>
                                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none"

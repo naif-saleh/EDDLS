@@ -93,6 +93,80 @@ class LicenseService
     }
 
 
+    /**
+     * Check IcrementProvidersCount
+     *
+     * @param  int|null  $tenantId
+     * @return bool
+     */
+    public function icrementProvidersCount($tenantId = null)
+    {
+        // Get fresh license without cache for modification
+        $license = $this->getActiveLicense($tenantId, true);
+
+        if (! $license) {
+            return false;
+        }
+
+        $tenantId = $tenantId ?? auth()->user()->tenant_id;
+        $tenant = Tenant::find($tenantId);
+
+        if (! $tenant) {
+            return false;
+        }
+
+
+
+        // Modify and save the license
+        $license->max_providers++;
+        $license->save();
+
+        // Clear the cache to ensure subsequent reads get the updated value
+        $cacheKey = "tenant_{$tenantId}_active_license";
+        Cache::forget($cacheKey);
+
+
+        return true;
+    }
+
+
+    /**
+     * Check Increment Agent Count
+     *
+     * @param  int|null  $tenantId
+     * @return bool
+     */
+
+    public function incrementAgentsCount($tenantId = null)
+    {
+        // Get fresh license without cache for modification
+        $license = $this->getActiveLicense($tenantId, true);
+
+        if (! $license) {
+            return false;
+        }
+
+        $tenantId = $tenantId ?? auth()->user()->tenant_id;
+        $tenant = Tenant::find($tenantId);
+
+        if (! $tenant) {
+            return false;
+        }
+
+
+
+        // Modify and save the license
+        $license->max_agents++;
+        $license->save();
+
+        // Clear the cache to ensure subsequent reads get the updated value
+        $cacheKey = "tenant_{$tenantId}_active_license";
+        Cache::forget($cacheKey);
+
+        return true;
+    }
+
+
      /**
      * Check validAgentsCount
      *
@@ -218,6 +292,92 @@ class LicenseService
 
         return true;
     }
+
+
+    /**
+     * Check validDistCallsCount
+     *
+     * @param  int|null  $tenantId
+     * @return bool
+     */
+    public function validDistCallsCount($tenantId = null)
+    {
+        // Get fresh license without cache for modification
+        $license = $this->getActiveLicense($tenantId, true);
+
+        if (! $license) {
+            return false;
+        }
+
+        $tenantId = $tenantId ?? auth()->user()->tenant_id;
+        $tenant = Tenant::find($tenantId);
+
+        if (! $tenant) {
+            return false;
+        }
+
+        if ($license->max_dist_calls <= 0) {
+            Log::info('License max Distributor calls limit reached');
+
+            return false;
+        }
+
+        // Modify and save the license
+        $license->max_dist_calls--;
+        $license->save();
+
+        // Clear the cache to ensure subsequent reads get the updated value
+        $cacheKey = "tenant_{$tenantId}_active_license";
+        Cache::forget($cacheKey);
+
+        Log::info('License max Dial Calls limit decreased to '.$license->max_dial_calls);
+
+        return true;
+    }
+
+
+     /**
+     * Check validContactsPerCampaignCount
+     *
+     * @param  int|null  $tenantId
+     * @return bool
+     */
+    public function validContactsPerCampaignCount($tenantId = null)
+    {
+        // Get fresh license without cache for modification
+        $license = $this->getActiveLicense($tenantId, true);
+
+        if (! $license) {
+            return false;
+        }
+
+        $tenantId = $tenantId ?? auth()->user()->tenant_id;
+        $tenant = Tenant::find($tenantId);
+
+        if (! $tenant) {
+            return false;
+        }
+
+        if ($license->max_contacts_per_campaign <= 0) {
+            Log::info('License max contacts limit reached');
+
+            return false;
+        }
+
+        // Modify and save the license
+        $license->max_contacts_per_campaign--;
+        $license->save();
+
+        // Clear the cache to ensure subsequent reads get the updated value
+        $cacheKey = "tenant_{$tenantId}_active_license";
+        Cache::forget($cacheKey);
+
+        Log::info('License max contacts limit decreased to '.$license->max_contacts_per_campaign);
+
+        return true;
+    }
+
+
 
     /**
      * Check if a tenant has a valid license

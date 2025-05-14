@@ -257,10 +257,10 @@ class Campaign extends Model
      *
      * @return void
      */
-    public static function updateAllCampaignStatuses()
-    {
-        self::active()->needingStatusUpdate()->get()->each(function ($campaign) {
-            $campaign->updateCampaignStatus();
-        });
-    }
+    // public static function updateAllCampaignStatuses()
+    // {
+    //     self::active()->needingStatusUpdate()->get()->each(function ($campaign) {
+    //         $campaign->updateCampaignStatus();
+    //     });
+    // }
 }

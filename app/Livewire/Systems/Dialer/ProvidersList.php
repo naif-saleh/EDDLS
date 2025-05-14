@@ -3,7 +3,9 @@
 namespace App\Livewire\Systems\Dialer;
 
 use App\Models\Agent;
+use App\Models\License;
 use App\Models\Provider;
+use App\Services\LicenseService;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
@@ -36,6 +38,13 @@ class ProvidersList extends Component
 
     public $confirmingDeleteId = null;
 
+    public $licenseSevice;
+
+    protected function getLicenseService()
+    {
+        return new LicenseService;
+    }
+
     // Update page while search
     public function updatingSearch()
     {
@@ -56,6 +65,12 @@ class ProvidersList extends Component
     // Create New Provider
     public function createProvider()
     {
+        $licenseService = $this->getLicenseService();
+        if (! $licenseService->validProvidersCount(auth()->user()->tenant->id)) {
+            Toaster::warning('License Providers limit reached. Please contact support.');
+
+            return;
+        }
         try {
             $validated = $this->validate([
                 'providerName' => [
@@ -181,6 +196,9 @@ class ProvidersList extends Component
         if ($provider) {
             $provider->delete();
             Toaster::success('Provider deleted successfully.');
+            $licenseService = $this->getLicenseService();
+            // Decrement the provider count in the license service
+            $licenseService->icrementProvidersCount(auth()->user()->tenant_id);
 
             return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
         } else {
@@ -195,7 +213,7 @@ class ProvidersList extends Component
     public function render()
     {
         // Initialize provider query
-        $query = Provider::query();
+        $query = Provider::query()->where('tenant_id', auth()->user()->tenant->id);
 
         // Apply search if provided
         if ($this->search) {
@@ -205,7 +223,7 @@ class ProvidersList extends Component
         }
 
         // Filter providers by the current user's tenant
-        $query->where('tenant_id', auth()->user()->tenant->id)
+        $query
             ->orderBy($this->sortField, $this->sortDirection);
 
         // Get providers with pagination
@@ -226,9 +244,12 @@ class ProvidersList extends Component
             $agent = Agent::where('tenant_id', auth()->user()->tenant_id)->first();
         }
 
+        $license = License::where('tenant_id', auth()->user()->tenant_id)->first();
+
         return view('livewire.systems.dialer.providers-list', [
             'providers' => $providers,
             'agent' => $agent,
+            'license' => $license,
         ]);
     }
 }

@@ -10,7 +10,8 @@ Artisan::command('inspire', function () {
 
 
 
-Schedule::command('dialer:make-calls')->everySecond();
+// Schedule::command('dialer:make-calls')->everySecond();
 
+Schedule::command('app:distributor-make-call-command')->everySecond();
 
 Schedule::command('campaign:update-status')->everySecond();

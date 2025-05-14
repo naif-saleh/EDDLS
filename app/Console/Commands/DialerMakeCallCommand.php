@@ -131,18 +131,19 @@ class DialerMakeCallCommand extends Command
         // Load active campaigns for this tenant
         $campaigns = Campaign::where('tenant_id', $tenant->id)
             ->where('allow', true)
+            ->where('campaign_type', 'dialer')
             ->whereDate('created_at', \Carbon\Carbon::today())
             ->whereBetween('start_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
             ->whereBetween('end_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
             ->get();
 
         if ($campaigns->isEmpty()) {
-            Log::info("No active campaigns found for tenant {$tenant->name}");
+            Log::info("No active Dialer campaigns found for tenant {$tenant->name}");
 
             return ['processed' => 0, 'calls' => 0];
         }
 
-        Log::info('Found '.$campaigns->count()." active campaigns for tenant {$tenant->name}");
+        Log::info('Found Dialer '.$campaigns->count()." active campaigns for tenant {$tenant->name}");
 
         // Check tenant's license limits
         $license = $tenant->activeLicense();
@@ -157,12 +158,12 @@ class DialerMakeCallCommand extends Command
             $provider = Provider::find($campaign->provider_id);
 
             if (! $provider || $provider->status !== 'active') {
-                Log::info("No active provider for campaign {$campaign->name}");
+                Log::info("No active provider for Dialer campaign {$campaign->name}");
 
                 continue;
             }
 
-            Log::info("Processing campaign: {$campaign->name} with provider: {$provider->name}");
+            Log::info("Processing Dialer campaign: {$campaign->name} with provider: {$provider->name}");
 
             // Update campaign status to 'calling' if it has contacts to process
             $contactsToProcess = Contact::where('campaign_id', $campaign->id)
@@ -231,7 +232,7 @@ class DialerMakeCallCommand extends Command
                             } else {
                                 Log::error("Tenant {$tenant->name}: License validation failed. Make Calls.");
                             }
-                  
+
 
                     // Check if we need to refresh the active calls to get the latest call ID
                     if (! $callId) {

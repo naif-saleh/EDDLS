@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Agent;
 use Carbon\Carbon;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Cache;
@@ -16,7 +17,7 @@ class ThreeCXIntegrationService
     protected $apiUrl;
     protected $tenantId;
 
-    public function __construct($tenantId = null)
+    public function __construct($tenantId = null, $tokenService = null)
     {
         $this->tenantId = $tenantId ?? auth()->user()->tenant_id;
         $this->tokenService = $tokenService ?? new ThreeCxTokenService($this->tenantId);
@@ -29,7 +30,7 @@ class ThreeCXIntegrationService
      */
     protected function loadApiUrl()
     {
-        $integration = ApiIntegration::where('tenant_id', $this->tenantId)->first();
+         $integration = ApiIntegration::where('tenant_id', $this->tenantId)->first();
 
         if (!$integration) {
             Log::error('❌ No API integration found for tenant ID: ' . $this->tenantId);
@@ -272,6 +273,54 @@ class ThreeCXIntegrationService
     }
 
 
+     public function isAgentInCall(Agent $agent)
+    {
+        // Check if the agent is already in a call
+        $token = $this->getToken();
+        $url = $this->apiUrl . "/callcontrol/{$agent->extension}/participants";
+        $response = $this->client->get($url, [
+            'headers' => ['Authorization' => "Bearer $token"],
+            'timeout' => 10,
+        ]);
+        Log::info('Response from isAgentInCall:', ['response' => $response->getBody()->getContents()]);
+        $participants = json_decode($response->getBody(), true);
+        return collect($participants)->contains(fn($p) => in_array($p['status'], ['Connected', 'Dialing', 'Ringing']));
+    }
+
+
+    public function makeCallDist(Agent $agent, $destination)
+    {
+        // Make a call to the given destination
+        $token = $this->getToken();
+        $mobileDevice = $this->getDeviceForAgent($agent);
+        if (!$mobileDevice) {
+            throw new \Exception("No 3CX Mobile Client device found for agent {$agent->extension}");
+        }
+        $url = $this->apiUrl . "/callcontrol/{$agent->extension}/devices/{$mobileDevice['device_id']}/makecall";
+        $response = $this->client->post($url, [
+            'headers' => ['Authorization' => "Bearer $token"],
+            'json' => ['destination' => $destination],
+            'timeout' => 10,
+        ]);
+
+        return json_decode($response->getBody(), true);
+    }
+
+    public function getDeviceForAgent(Agent $agent)
+    {
+        // Fetch devices for agent and return the mobile device
+        $token = $this->getToken();
+        $url = $this->apiUrl . "/callcontrol/{$agent->extension}/devices";
+        $response = $this->client->get($url, [
+            'headers' => ['Authorization' => "Bearer $token"],
+            'timeout' => 10,
+        ]);
+        $devices = json_decode($response->getBody(), true);
+
+        return collect($devices)->firstWhere('user_agent', '3CX Mobile Client');
+    }
+
+
 //     /**
 //      * Update call record in database with consistent format
 //      */
@@ -390,19 +439,7 @@ class ThreeCXIntegrationService
 
 
 
-//     public function isAgentInCall(ADistAgent $agent)
-//     {
-//         // Check if the agent is already in a call
-//         $token = $this->getToken();
-//         $url = $this->apiUrl . "/callcontrol/{$agent->extension}/participants";
-//         $response = $this->client->get($url, [
-//             'headers' => ['Authorization' => "Bearer $token"],
-//             'timeout' => 10,
-//         ]);
-//         Log::info('Response from isAgentInCall:', ['response' => $response->getBody()->getContents()]);
-//         $participants = json_decode($response->getBody(), true);
-//         return collect($participants)->contains(fn($p) => in_array($p['status'], ['Connected', 'Dialing', 'Ringing']));
-//     }
+
 
 //     public function isWithinCallWindow(ADistFeed $feed)
 //     {
@@ -419,35 +456,5 @@ class ThreeCXIntegrationService
 //         return $now->between($from, $to);
 //     }
 
-//     public function makeCallDist(ADistAgent $agent, $destination)
-//     {
-//         // Make a call to the given destination
-//         $token = $this->getToken();
-//         $mobileDevice = $this->getDeviceForAgent($agent);
-//         if (!$mobileDevice) {
-//             throw new \Exception("No 3CX Mobile Client device found for agent {$agent->extension}");
-//         }
-//         $url = $this->apiUrl . "/callcontrol/{$agent->extension}/devices/{$mobileDevice['device_id']}/makecall";
-//         $response = $this->client->post($url, [
-//             'headers' => ['Authorization' => "Bearer $token"],
-//             'json' => ['destination' => $destination],
-//             'timeout' => 10,
-//         ]);
 
-//         return json_decode($response->getBody(), true);
-//     }
-
-//     public function getDeviceForAgent(ADistAgent $agent)
-//     {
-//         // Fetch devices for agent and return the mobile device
-//         $token = $this->getToken();
-//         $url = $this->apiUrl . "/callcontrol/{$agent->extension}/devices";
-//         $response = $this->client->get($url, [
-//             'headers' => ['Authorization' => "Bearer $token"],
-//             'timeout' => 10,
-//         ]);
-//         $devices = json_decode($response->getBody(), true);
-
-//         return collect($devices)->firstWhere('user_agent', '3CX Mobile Client');
-//     }
  }

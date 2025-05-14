@@ -120,9 +120,11 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
         $providerCache = []; // Cache to store provider IDs by name+extension
         $fileToCampaignProvider = []; // Map to track which provider belongs to which file
 
+        $licenseSevice = new LicenseService; // Create a single instance outside the loop
+
         while (($row = fgetcsv($file)) !== false) {
             $rowNumber++;
-            $licenseSevice = new LicenseService;
+
             // Skip empty rows
             if (empty($row) || count(array_filter($row)) === 0) {
                 Log::warning("Skipping empty row at line {$rowNumber}");
@@ -224,35 +226,6 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                 $providerExtension = $data['provider_extension'];
                 $providerKey = $providerName.'|'.$providerExtension;
 
-                // Check if this file already has an assigned provider that's different from current row
-                // if (isset($fileToCampaignProvider[$fileName]) &&
-                //     $fileToCampaignProvider[$fileName] !== $providerKey) {
-                //     Log::warning("Skipping row {$rowNumber}: File '{$fileName}' already associated with different provider. ".
-                //                 "Expected '{$fileToCampaignProvider[$fileName]}', got '{$providerKey}'");
-
-                //     // Track skipped row with provider mismatch
-                //     $previousProviderKey = $fileToCampaignProvider[$fileName];
-                //     [$prevProvName, $prevProvExt] = explode('|', $previousProviderKey);
-                //     $prevProvider = Provider::where('tenant_id', $this->tenantId)
-                //         ->where('name', $prevProvName)
-                //         ->where('extension', $prevProvExt)
-                //         ->first();
-
-                //     $this->saveSkippedNumber(
-                //         $data['phone_number'],
-                //         $prevProvider ? $prevProvider->id : null,
-                //         null, // No campaign ID for provider mismatch
-                //         'file_provider_mismatch',
-                //         $fileName,
-                //         $rowNumber,
-                //         $data
-                //     );
-
-                //     $skippedCount++;
-
-                //     continue;
-                // }
- 
                 // Associate this file with this provider
                 $fileToCampaignProvider[$fileName] = $providerKey;
 
@@ -289,7 +262,7 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                                     ->where('slug', $slug)
                                     ->exists();
                             }
-                            // Check if Licesnse is valid
+                            // Check if License is valid
                             if ($licenseSevice->validProvidersCount($this->tenantId)) {
                                 // Create the provider with the unique slug and ensure tenant_id is set
                                 $provider = Provider::create([
@@ -298,10 +271,12 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                                     'name' => $providerName,
                                     'extension' => $providerExtension,
                                 ]);
+
+                                Log::info("Tenant {$this->tenantId}: Created new provider: {$providerName} ({$providerExtension}) with slug: {$slug}, ID: {$provider->id}");
                             } else {
-                                Log::error("Tenant {$this->tenantId}: License validation failed. Cannot process CSV import.");
+                                Log::error("Tenant {$this->tenantId}: License validation failed for provider creation. Cannot process CSV import.");
+                                break; // Exit the loop if license validation fails
                             }
-                            Log::info("Tenant {$this->tenantId}: Created new provider: {$providerName} ({$providerExtension}) with slug: {$slug}, ID: {$provider->id}");
                         } else {
                             Log::info("Tenant {$this->tenantId}: Found existing provider: {$providerName} ({$providerExtension}) with slug: {$provider->slug}, ID: {$provider->id}");
                         }
@@ -311,7 +286,6 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                         Log::error("Tenant {$this->tenantId}: Error processing provider {$providerName} ({$providerExtension}): ".$e->getMessage());
                         throw $e;
                     }
-
                 }
                 $providerId = $providerCache[$providerKey];
 
@@ -403,15 +377,19 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
 
                             if ($licenseSevice->validCampaignsCount($this->tenantId)) {
                                 // Create campaign with a lock to prevent concurrent creation
-                            $campaign = Campaign::create($campaignData);
-                            return $campaign;
-                            } else {
-                                Log::error("Tenant {$this->tenantId}: License validation failed. Cannot process CSV import.");
-                            }
-                           
+                                $campaign = Campaign::create($campaignData);
 
-                            
+                                return $campaign;
+                            } else {
+                                Log::error("Tenant {$this->tenantId}: License validation failed for campaign creation. Cannot process CSV import.");
+                                return null;
+                            }
                         }, 5); // 5 retries if deadlock occurs
+
+                        if (!$campaign) {
+                            Log::error("Tenant {$this->tenantId}: Failed to create campaign due to license restrictions.");
+                            break; // Exit the loop if campaign creation fails
+                        }
 
                         Log::info("Tenant {$this->tenantId}: Created new campaign: {$fileName} with slug: {$finalSlug}, ID: {$campaign->id}, batch: {$this->batchId}");
                         $campaignCache[$campaignKey] = $campaign->id;
@@ -458,11 +436,17 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
                 ];
 
                 if (count($contactsData) >= $this->chunkSize) {
-                    $this->insertContacts($contactsData);
-                    $processedCount += count($contactsData);
-                    $this->updateProgress($processedCount);
-                    $contactsData = [];
+                    if ($licenseSevice->validContactsPerCampaignCount($this->tenantId)) {
+                        $this->insertContacts($contactsData);
+                        $processedCount += count($contactsData);
+                        $this->updateProgress($processedCount);
+                        $contactsData = [];
+                    } else {
+                        Log::warning("Tenant {$this->tenantId}: License contact limit reached, stopping import");
+                        break;
+                    }
                 }
+
             } catch (\Exception $e) {
                 Log::error("Tenant {$this->tenantId}: Error processing row {$rowNumber}: ".$e->getMessage());
 
@@ -485,10 +469,15 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
             }
         }
 
-        if (! empty($contactsData)) {
-            $this->insertContacts($contactsData);
-            $processedCount += count($contactsData);
-            $this->updateProgress($processedCount);
+        // Process any remaining contacts
+        if (!empty($contactsData)) {
+            if ($licenseSevice->validContactsPerCampaignCount($this->tenantId)) {
+                $this->insertContacts($contactsData);
+                $processedCount += count($contactsData);
+                $this->updateProgress($processedCount);
+            } else {
+                Log::warning("Tenant {$this->tenantId}: License contact limit reached, some contacts not processed");
+            }
         }
 
         fclose($file);
@@ -528,7 +517,6 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
             // Just log the error but don't fail the job since data has been processed
             Log::error("Tenant {$this->tenantId}: Error during final verification: ".$e->getMessage());
         }
-
     }
 
     /**

@@ -45,85 +45,81 @@ class SyncronizeAgentsFromPbxJob implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(): void
-    {
-        // Use a lock to prevent multiple overlapping executions
-        $lockKey = 'adist_update_user_status_running';
+   public function handle(): void
+{
+    // Use a lock to prevent multiple overlapping executions
+    $lockKey = 'adist_update_user_status_running';
 
-        if (Cache::has($lockKey)) {
-            Log::info('ADistUpdateUserStatusJob: Another instance is already running');
-
-            return;
-        }
-
-        // Lock for 30 seconds max
-        Cache::put($lockKey, true, 30);
-
-        try {
-            $startTime = microtime(true);
-
-            // Use cached data if it's recent enough (within 10 seconds)
-            $cacheKey = 'three_cx_users_data';
-            $users = Cache::remember($cacheKey, 10, function (){
-                try {
-                    $result = $this->three_cxintegration_service_value;
-                    if (isset($result['value']) && is_array($result['value'])) {
-                        return $result;
-                    }
-
-                    return null;
-                } catch (\Exception $e) {
-                    Log::error('Failed to fetch users: '.$e->getMessage());
-
-                    return null;
-                }
-            });
-
-            if ($users && isset($users['value']) && is_array($users['value'])) {
-                // Use a persistent database connection to avoid reconnection overhead
-                $connection = DB::connection();
-                $pdo = $connection->getPdo();
-
-                // Check if connection is still alive
-                if (! $pdo || ! $this->isConnectionAlive($pdo)) {
-                    $connection->reconnect();
-                    $pdo = $connection->getPdo();
-                }
-
-                // Proceed without wrapping in a transaction
-                foreach ($users['value'] as $user) {
-                    // Log::info('Processing user:', [
-                    //     'id' => $user['Id'],
-                    //     'name' => $user['DisplayName'],
-                    //     'email' => $user['EmailAddress'],
-                    //     'profile' => $user['CurrentProfileName']
-                    // ]);
-                    Agent::updateOrCreate(
-                        ['three_cx_user_id' => $user['Id']],
-                        [
-                            'three_cx_user_id' => $user['Id'],
-                            'tenant_id' => $this->tenant_id,
-                            'slug' => Str::random(10),
-                            'CurrentProfileName' => $user['CurrentProfileName'],
-                            'name' => $user['DisplayName'],
-                            'email' => $user['EmailAddress'],
-                            'QueueStatus' => $user['QueueStatus'],
-                            'extension' => $user['Number'],
-                            'ContactImage' => $user['FirstName'],
-                        ]
-                    );
-                }
-
-                $executionTime = round(microtime(true) - $startTime, 3);
-                Log::info('ADistUpdateUserStatusJob: ✅ Updated '.count($users['value'])." users in {$executionTime}s");
-            }
-        } catch (\Exception $e) {
-            Log::error('ADistUpdateUserStatusJob Error: '.$e->getMessage());
-            throw $e;
-        } finally {
-            Cache::forget($lockKey);
-        }
+    if (Cache::has($lockKey)) {
+        Log::info('ADistUpdateUserStatusJob: Another instance is already running');
+        return;
     }
+
+    // Lock for 30 seconds max
+    Cache::put($lockKey, true, 30);
+
+    try {
+        $startTime = microtime(true);
+
+        // The users data is already provided to the job
+        $users = $this->three_cxintegration_service_value;
+
+        if ($users && isset($users['value']) && is_array($users['value'])) {
+            // Use a persistent database connection to avoid reconnection overhead
+            $connection = DB::connection();
+            $pdo = $connection->getPdo();
+
+            // Check if connection is still alive
+            if (!$pdo || !$this->isConnectionAlive($pdo)) {
+                $connection->reconnect();
+                $pdo = $connection->getPdo();
+            }
+
+            // Proceed without wrapping in a transaction
+            foreach ($users['value'] as $user) {
+                Log::info('Processing user:', [
+                    'id' => $user['Id'] ?? 'Unknown ID',
+                    'name' => $user['DisplayName'] ?? 'Unknown Name',
+                    'email' => $user['EmailAddress'] ?? 'Unknown Email',
+                    'profile' => $user['CurrentProfileName'] ?? 'Unknown Profile'
+                ]);
+
+                Agent::updateOrCreate(
+                    [
+                        'three_cx_user_id' => $user['Id'],
+                        'tenant_id' => $this->tenant_id,
+                    ],
+
+                    [
+                        'three_cx_user_id' => $user['Id'],
+                        'tenant_id' => $this->tenant_id,
+                        'slug' => Str::random(10),
+                        'CurrentProfileName' => $user['CurrentProfileName'] ?? null,
+                        'name' => $user['DisplayName'] ?? null,
+                        'email' => $user['EmailAddress'] ?? null,
+                        'QueueStatus' => $user['QueueStatus'] ?? null,
+                        'extension' => $user['Number'] ?? null,
+                        'ContactImage' => $user['FirstName'] ?? null,
+                    ]
+                );
+            }
+
+            $executionTime = round(microtime(true) - $startTime, 3);
+            Log::info('ADistUpdateUserStatusJob: ✅ Updated '.count($users['value'])." users in {$executionTime}s");
+        } else {
+            Log::error('ADistUpdateUserStatusJob: No valid user data found', [
+                'data_received' => json_encode($users)
+            ]);
+        }
+    } catch (\Exception $e) {
+        Log::error('ADistUpdateUserStatusJob Error: '.$e->getMessage(), [
+            'trace' => $e->getTraceAsString()
+        ]);
+        throw $e;
+    } finally {
+        Cache::forget($lockKey);
+    }
+}
 
     /**
      * Check if database connection is still alive
