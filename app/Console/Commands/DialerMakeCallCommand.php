@@ -128,6 +128,15 @@ class DialerMakeCallCommand extends Command
         $callsMade = 0;
         $campaignStatusService = new CampaignStatusService;
 
+        if (empty($tenant->setting->start_time) || empty($tenant->setting->end_time)) {
+            Log::info("Tenant {$tenant->name} has no start or end time set for dialer calls");
+            return ['processed' => 0, 'calls' => 0];
+        }
+
+        if(! now()->between($tenant->setting->start_time , $tenant->setting->end_time)) {
+            Log::info("Tenant {$tenant->name} is out of time for dialer calls");
+            return ['processed' => 0, 'calls' => 0];
+        }
         // Load active campaigns for this tenant
         $campaigns = Campaign::where('tenant_id', $tenant->id)
             ->where('allow', true)
@@ -168,7 +177,7 @@ class DialerMakeCallCommand extends Command
             // Update campaign status to 'calling' if it has contacts to process
             $contactsToProcess = Contact::where('campaign_id', $campaign->id)
                 ->where('status', 'new')
-                ->underMaxAttempts(3)
+                ->take($tenant->setting->calls_at_time)
                 ->count();
 
             if ($contactsToProcess > 0) {

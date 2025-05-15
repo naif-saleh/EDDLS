@@ -5,13 +5,16 @@ use App\Livewire\Admin\Dashboard\AdminStats;
 use App\Livewire\Admin\Dashboard\AgentStats;
 use App\Livewire\Admin\Licenses\LicenseContent;
 use App\Livewire\Admin\Licenses\LicenseForm;
+use App\Livewire\Admin\Licenses\LicenseForTenant;
 use App\Livewire\Admin\Licenses\LicenseList;
 use App\Livewire\Admin\Licenses\LicenseUpdate;
+use App\Livewire\Admin\SystemLog\TenantLog;
 use App\Livewire\Admin\Tenants\TenantList;
 use App\Livewire\ApiIntegration\CradentialsForm;
 use App\Livewire\Settings\Appearance;
 use App\Livewire\Settings\Password;
 use App\Livewire\Settings\Profile;
+use App\Livewire\Settings\TenantSettings;
 use App\Livewire\Systems\Campaign\DialerCampaignDetails;
 use App\Livewire\Systems\Campaign\DialerCampaignForm;
 use App\Livewire\Systems\Campaign\DialerCampaignsList;
@@ -70,6 +73,14 @@ Route::prefix('tenant/{tenant:slug}')->name('tenant.')->middleware(['auth', 'ten
     //Api Integration
     Route::get('/api-integration', CradentialsForm::class)->name('integration.form');
 
+    //License View
+    Route::get('licesnse-information', LicenseForTenant::class)->name('license.tenant');
+
+    //System Log
+    Route::get('system-log-view', TenantLog::class)->name('system.log');
+
+    //Tenant Settings
+        Route::get('settings', TenantSettings::class)->name('settings');
 
 
 

@@ -2,12 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Agent;
 use App\Models\CallLog;
 use App\Models\Campaign;
 use App\Models\Contact;
 use App\Models\Provider;
 use App\Models\Tenant;
-use App\Models\Agent;
 // use App\Services\CampaignStatusService;
 use App\Services\LicenseService;
 use App\Services\ThreeCXIntegrationService;
@@ -84,6 +84,7 @@ class DistributorMakeCallCommand extends Command
 
         if ($tenants->isEmpty()) {
             Log::info('No active tenants found');
+
             return;
         }
 
@@ -121,48 +122,60 @@ class DistributorMakeCallCommand extends Command
      *
      * @return array
      */
-   protected function processTenant(Tenant $tenant)
-{
-    $processed = 0;
-    $callsMade = 0;
-    $licenseService = new LicenseService;
+    protected function processTenant(Tenant $tenant)
+    {
+        $processed = 0;
+        $callsMade = 0;
+        $licenseService = new LicenseService;
 
-    // Initialize the 3CX service for this tenant
-    $threeCxService = new ThreeCXIntegrationService($tenant->id);
+        // Initialize the 3CX service for this tenant
+        $threeCxService = new ThreeCXIntegrationService($tenant->id);
 
-    // Check tenant's license limits
-    $license = $tenant->activeLicense();
-    if (!$license) {
-        Log::warning("No active license for tenant {$tenant->name}");
-        return ['processed' => 0, 'calls' => 0];
-    }
+        if (empty($tenant->setting->start_time) || empty($tenant->setting->end_time)) {
+            Log::info("Tenant {$tenant->name} has no start or end time set for dialer calls");
 
-    // Get active agents with their own campaigns that have new contacts
-    $agents = Agent::where('tenant_id', $tenant->id)
-        ->where('status', 'active')
-        ->whereHas('campaigns', function ($query) {
-            $query->where('allow', true)
-                ->where('campaign_type', 'distributor')
-                ->whereDate('created_at', \Carbon\Carbon::today())
-                ->whereBetween('start_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
-                ->whereBetween('end_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
-                ->whereHas('contacts', function($contactQuery) {
-                    $contactQuery->where('status', 'new');
-                });
-        })
-        ->with(['campaigns' => function($query) {
-            $query->where('allow', true)
-                ->where('campaign_type', 'distributor')
-                ->whereDate('created_at', \Carbon\Carbon::today())
-                ->whereBetween('start_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
-                ->whereBetween('end_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
-                ->whereHas('contacts', function($contactQuery) {
-                    $contactQuery->where('status', 'new');
-                });
-        }])
-        ->get();
+            return ['processed' => 0, 'calls' => 0];
+        }
 
-    // Log agent details for clarity
+        if (! now()->between($tenant->setting->start_time, $tenant->setting->end_time)) {
+            Log::info("Tenant {$tenant->name} is out of time for dialer calls");
+
+            return ['processed' => 0, 'calls' => 0];
+        }
+        // Check tenant's license limits
+        $license = $tenant->activeLicense();
+        if (! $license) {
+            Log::warning("No active license for tenant {$tenant->name}");
+
+            return ['processed' => 0, 'calls' => 0];
+        }
+
+        // Get active agents with their own campaigns that have new contacts
+        $agents = Agent::where('tenant_id', $tenant->id)
+            ->where('status', 'active')
+            ->whereHas('campaigns', function ($query) {
+                $query->where('allow', true)
+                    ->where('campaign_type', 'distributor')
+                    ->whereDate('created_at', \Carbon\Carbon::today())
+                    ->whereBetween('start_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
+                    ->whereBetween('end_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
+                    ->whereHas('contacts', function ($contactQuery) {
+                        $contactQuery->where('status', 'new');
+                    });
+            })
+            ->with(['campaigns' => function ($query) {
+                $query->where('allow', true)
+                    ->where('campaign_type', 'distributor')
+                    ->whereDate('created_at', \Carbon\Carbon::today())
+                    ->whereBetween('start_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
+                    ->whereBetween('end_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
+                    ->whereHas('contacts', function ($contactQuery) {
+                        $contactQuery->where('status', 'new');
+                    });
+            }])
+            ->get();
+
+        // Log agent details for clarity
 
         // foreach ($agents as $agent) {
         //     $campaignCount = $agent->campaigns->count();
@@ -173,209 +186,228 @@ class DistributorMakeCallCommand extends Command
         //     }
         // }
 
+        if ($agents->isEmpty()) {
+            Log::info("No active agents with eligible campaigns found for tenant {$tenant->name}");
 
-    if ($agents->isEmpty()) {
-        Log::info("No active agents with eligible campaigns found for tenant {$tenant->name}");
-        return ['processed' => 0, 'calls' => 0];
-    }
-
-    Log::info("Processing {$agents->count()} active agents for tenant {$tenant->name}");
-
-    $agentsProcessed = 0;
-
-    // Process each agent
-    foreach ($agents as $agent) {
-        Log::info("Processing agent: {$agent->name} (ID: {$agent->id})");
-        $agentsProcessed++;
-
-        // Skip if agent is already in a call
-        if ($threeCxService->isAgentInCall($agent)) {
-            Log::info("⚠️ Agent {$agent->name} (ID: {$agent->id}, Extension: {$agent->extension}) is currently in a call. Skipping.");
-            continue;
+            return ['processed' => 0, 'calls' => 0];
         }
 
-        // Get campaigns specifically belonging to this agent
-        $campaigns = $agent->campaigns()
-            ->where('allow', true)
-            ->where('campaign_type', 'distributor')
-            ->whereDate('created_at', \Carbon\Carbon::today())
-            ->whereBetween('start_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
-            ->whereBetween('end_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
-            ->whereHas('contacts', function($query) {
-                $query->where('status', 'new');
-            })
-            ->get();
+        Log::info("Processing {$agents->count()} active agents for tenant {$tenant->name}");
 
-        if ($campaigns->isEmpty()) {
-            Log::info("No eligible campaigns found for agent {$agent->name}");
-            continue;
-        }
+        $agentsProcessed = 0;
 
-        Log::info("Processing {$campaigns->count()} campaigns for agent {$agent->name}");
-        $campaignsProcessed = 0;
+        // Process each agent
+        foreach ($agents as $agent) {
+            Log::info("Processing agent: {$agent->name} (ID: {$agent->id})");
+            $agentsProcessed++;
 
-        // Process each campaign for this agent
-        foreach ($campaigns as $campaign) {
-            $campaignsProcessed++;
-            Log::info("Processing campaign: {$campaign->name} (ID: {$campaign->id})");
+            // Skip if agent is already in a call
+            if ($threeCxService->isAgentInCall($agent)) {
+                Log::info("⚠️ Agent {$agent->name} (ID: {$agent->id}, Extension: {$agent->extension}) is currently in a call. Skipping.");
 
-            // Get the provider for this campaign
-            $provider = $campaign->provider;
-
-            if (!$provider || $provider->status !== 'active') {
-                Log::info("No active provider found for campaign {$campaign->name}");
                 continue;
             }
 
-            Log::info("Using provider: {$provider->name} (ID: {$provider->id})");
+            // Get campaigns specifically belonging to this agent
+            $campaigns = $agent->campaigns()
+                ->where('allow', true)
+                ->where('campaign_type', 'distributor')
+                ->whereDate('created_at', \Carbon\Carbon::today())
+                ->whereBetween('start_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
+                ->whereBetween('end_time', [\Carbon\Carbon::now()->startOfDay(), \Carbon\Carbon::now()->endOfDay()])
+                ->whereHas('contacts', function ($query) {
+                    $query->where('status', 'new');
+                })
+                ->get();
 
-            $result = $this->processCampaign($tenant, $agent, $provider, $campaign, $threeCxService, $licenseService);
-            $processed += $result['processed'];
-            $callsMade += $result['calls'];
+            if ($campaigns->isEmpty()) {
+                Log::info("No eligible campaigns found for agent {$agent->name}");
 
-            // Break out of the campaign loop if max calls reached
-            if ($callsMade >= $this->maxCallsPerMinute) {
-                Log::info("Rate limit reached for tenant {$tenant->name}, pausing");
-                break 2; // Break out of all loops
+                continue;
             }
+
+            Log::info("Processing {$campaigns->count()} campaigns for agent {$agent->name}");
+            $campaignsProcessed = 0;
+
+            // Process each campaign for this agent
+            foreach ($campaigns as $campaign) {
+                $campaignsProcessed++;
+                Log::info("Processing campaign: {$campaign->name} (ID: {$campaign->id})");
+
+                // Get the provider for this campaign
+                $provider = $campaign->provider;
+
+                if (! $provider || $provider->status !== 'active') {
+                    Log::info("No active provider found for campaign {$campaign->name}");
+
+                    continue;
+                }
+
+                Log::info("Using provider: {$provider->name} (ID: {$provider->id})");
+
+                $result = $this->processCampaign($tenant, $agent, $provider, $campaign, $threeCxService, $licenseService);
+                $processed += $result['processed'];
+                $callsMade += $result['calls'];
+
+                // Break out of the campaign loop if max calls reached
+                if ($callsMade >= $this->maxCallsPerMinute) {
+                    Log::info("Rate limit reached for tenant {$tenant->name}, pausing");
+                    break 2; // Break out of all loops
+                }
+            }
+
+            Log::info("Completed processing {$campaignsProcessed} campaigns for agent {$agent->name}");
         }
 
-        Log::info("Completed processing {$campaignsProcessed} campaigns for agent {$agent->name}");
+        Log::info("Tenant {$tenant->name} summary: {$agentsProcessed} agents processed");
+
+        return [
+            'processed' => $processed,
+            'calls' => $callsMade,
+        ];
     }
 
-    Log::info("Tenant {$tenant->name} summary: {$agentsProcessed} agents processed");
-    return [
-        'processed' => $processed,
-        'calls' => $callsMade,
-    ];
-}
+    /**
+     * Process a single campaign
+     *
+     * @return array
+     */
+    protected function processCampaign(
+        Tenant $tenant,
+        Agent $agent,
+        Provider $provider,
+        Campaign $campaign,
+        ThreeCXIntegrationService $threeCxService,
+        LicenseService $licenseService
+    ) {
+        $campaignProcessed = 0;
+        $campaignCalls = 0;
+        $contactsProcessed = 0;
 
-/**
- * Process a single campaign
- *
- * @param Tenant $tenant
- * @param Agent $agent
- * @param Provider $provider
- * @param Campaign $campaign
- * @param ThreeCXIntegrationService $threeCxService
- * @param LicenseService $licenseService
- * @return array
- */
-protected function processCampaign(
-    Tenant $tenant,
-    Agent $agent,
-    Provider $provider,
-    Campaign $campaign,
-    ThreeCXIntegrationService $threeCxService,
-    LicenseService $licenseService
-) {
-    $campaignProcessed = 0;
-    $campaignCalls = 0;
-    $contactsProcessed = 0;
+        Log::info("Processing Distributor campaign: {$campaign->name} with provider: {$provider->name} for agent: {$agent->name}");
 
-    Log::info("Processing Distributor campaign: {$campaign->name} with provider: {$provider->name} for agent: {$agent->name}");
+        // Get contacts to process for this campaign
+        $contacts = Contact::where('campaign_id', $campaign->id)
+            ->where('status', 'new')
+            ->take($tenant->setting->calls_at_time)
+            ->get();
 
-    // Get contacts to process for this campaign
-    $contacts = Contact::where('campaign_id', $campaign->id)
-        ->where('status', 'new')
-        ->get();
+        if ($contacts->isEmpty()) {
+            Log::info("No new contacts to process for campaign {$campaign->name}");
 
-    if ($contacts->isEmpty()) {
-        Log::info("No new contacts to process for campaign {$campaign->name}");
-        return ['processed' => 0, 'calls' => 0];
-    }
-
-    Log::info("Processing {$contacts->count()} contacts for campaign {$campaign->name}");
-
-    // Process contacts
-    foreach ($contacts as $contact) {
-        $contactsProcessed++;
-        Log::info("Processing contact: ID: {$contact->id}, Phone: {$contact->phone_number}");
-
-        // Check if we've reached rate limits
-        if ($campaignCalls >= $this->maxCallsPerMinute) {
-            Log::info("Rate limit reached for campaign {$campaign->name}, pausing");
-            break;
+            return ['processed' => 0, 'calls' => 0];
         }
 
-        // Skip if agent is now in call
-        if ($threeCxService->isAgentInCall($agent)) {
-            Log::info("⚠️ Agent {$agent->name} ({$agent->extension}) is now in a call. Skipping remaining contacts.");
-            break;
-        }
+        Log::info("Processing {$contacts->count()} contacts for campaign {$campaign->name}");
 
-        try {
-            $campaignProcessed++;
+        // Process contacts
+        foreach ($contacts as $contact) {
+            $contactsProcessed++;
+            Log::info("Processing contact: ID: {$contact->id}, Phone: {$contact->phone_number}");
 
-            // Check license validity for making calls
-            if ($licenseService->validDistCallsCount($tenant->id)) {
-                // Make the actual call through the agent
-                Log::info("Initiating call to {$contact->phone_number} via agent {$agent->name} (Extension: {$agent->extension})");
-                $callResponse = $threeCxService->makeCallDist($agent, $contact->phone_number);
+            // Check if we've reached rate limits
+            if ($campaignCalls >= $this->maxCallsPerMinute) {
+                Log::info("Rate limit reached for campaign {$campaign->name}, pausing");
+                break;
+            }
 
-                // Try to get callId from response
-                $callId = $callResponse['result']['callid'] ?? null;
-                $callStatus = 'initiated';
+            // Skip if agent is now in call
+            if ($threeCxService->isAgentInCall($agent)) {
+                Log::info("⚠️ Agent {$agent->name} ({$agent->extension}) is now in a call. Skipping remaining contacts.");
+                break;
+            }
 
-                // Only mark as calling if we have a successful call response
-                if ($callId || isset($callResponse['result']['success'])) {
-                    // Mark contact as calling only after successful call initiation
-                    $contact->markAsCalling();
+            try {
+                $campaignProcessed++;
 
-                    if (!$callId) {
-                        // Refresh active calls to get latest call ID
-                        $refreshCallsResponse = $threeCxService->getActiveCallsForProvider($provider->extension);
-                        if (isset($refreshCallsResponse['value']) && !empty($refreshCallsResponse['value'])) {
-                            $activeCall = $refreshCallsResponse['value'][0];
-                            $callId = $activeCall['Id'] ?? null;
-                            $callStatus = $activeCall['Status'] ?? null;
-                            Log::info("Updated active call - Call ID: {$callId}, Status: {$callStatus}");
+                // Check license validity for making calls
+                if ($licenseService->validDistCallsCount($tenant->id)) {
+                    // Make the actual call through the agent
+                    Log::info("Initiating call to {$contact->phone_number} via agent {$agent->name} (Extension: {$agent->extension})");
+                    $callResponse = $threeCxService->makeCallDist($agent, $contact->phone_number);
+
+                    // Log the raw response for debugging
+                    Log::debug('Raw call response:', ['response' => $callResponse]);
+
+                    // Add a short delay to ensure the call is registered in the system
+                    usleep(500000); // 500ms delay
+
+                    // Refresh active calls to get latest call ID
+                    $refreshCallsResponse = $threeCxService->getActiveCallsForProvider($agent->extension);
+
+                    // Log the raw response for debugging
+                    Log::debug('Active calls response:', ['response' => $refreshCallsResponse]);
+
+                    $callId = null;
+                    $callStatus = null;
+
+                    // Make sure we have a valid response and the Value key exists
+                    if (is_array($refreshCallsResponse) && isset($refreshCallsResponse['Value'])) {
+                        if (is_array($refreshCallsResponse['Value']) && ! empty($refreshCallsResponse['Value'])) {
+                            // Check if Value is an indexed array
+                            if (isset($refreshCallsResponse['Value'][0])) {
+                                $activeCall = $refreshCallsResponse['Value'][0];
+                                $callId = $activeCall['Id'] ?? null;
+                                $callStatus = $activeCall['Status'] ?? null;
+                            }
+                            // Check if Value is an associative array (direct object)
+                            elseif (isset($refreshCallsResponse['Value']['Id'])) {
+                                $callId = $refreshCallsResponse['Value']['Id'];
+                                $callStatus = $refreshCallsResponse['Value']['Status'] ?? 'unknown';
+                            }
                         }
                     }
 
-                    // Log call details
-                    $callLog = CallLog::create([
-                        'call_id' => $callId ?? 0,
-                        'campaign_id' => $campaign->id,
-                        'provider_id' => $provider->id,
-                        'agent_id' => $agent->id,
-                        'contact_id' => $contact->id,
-                        'call_status' => $callStatus ?? 'initiated',
-                        'call_type' => 'distributor',
-                        'called_at' => now(),
-                    ]);
+                    if ($callId) {
+                        Log::info("Updated active call - Call ID: {$callId}, Status: {$callStatus}");
 
-                    Log::info("CallLog created with Call ID: {$callId}, Status: {$callStatus}");
-                    $campaignCalls++;
+                        // Mark contact as calling only after successful call initiation
+                        // $contact->markAsCalling();
 
-                    Log::info("Call initiated: {$contact->phone_number} for tenant {$tenant->id}, agent {$agent->id}, campaign {$campaign->id}");
+                        // Log call details
+                        $callLog = CallLog::create([
+                            'call_id' => $callId,
+                            'campaign_id' => $campaign->id,
+                            'provider_id' => $provider->id,
+                            'agent_id' => $agent->id,
+                            'contact_id' => $contact->id,
+                            'call_status' => $callStatus ?? 'initiated',
+                            'call_type' => 'distributor',
+                            'called_at' => now(),
+                        ]);
 
-                    // Add delay between calls for rate limiting
-                    usleep($this->callDelay);
+                        Log::info("CallLog created with Call ID: {$callId}, Status: {$callStatus}");
+                        $campaignCalls++;
+
+                        Log::info("Call initiated: {$contact->phone_number} for tenant {$tenant->id}, agent {$agent->id}, campaign {$campaign->id}");
+
+                        // Add delay between calls for rate limiting
+                        usleep($this->callDelay);
+                    } else {
+                        // Call initiation failed or could not get call ID
+                        Log::error("Failed to initiate call or get call ID for {$contact->phone_number} for tenant {$tenant->id}");
+                        Log::error('API may not have returned expected response format');
+                    }
                 } else {
-                    // Call initiation failed
-                    Log::error("Failed to initiate call to {$contact->phone_number} for tenant {$tenant->id}");
+                    Log::error("Tenant {$tenant->name}: License validation failed. Cannot make calls.");
                 }
-            } else {
-                Log::error("Tenant {$tenant->name}: License validation failed. Cannot make calls.");
+            } catch (\Exception $e) {
+                // Handle call failure
+                Log::error("Call failed for contact {$contact->id}: {$e->getMessage()}", [
+                    'tenant_id' => $tenant->id,
+                    'agent_id' => $agent->id,
+                    'campaign_id' => $campaign->id,
+                    'contact_id' => $contact->id,
+                    'exception' => $e,
+                ]);
             }
-        } catch (\Exception $e) {
-            // Handle call failure
-            Log::error("Call failed for contact {$contact->id}: {$e->getMessage()}", [
-                'tenant_id' => $tenant->id,
-                'agent_id' => $agent->id,
-                'campaign_id' => $campaign->id,
-                'contact_id' => $contact->id,
-                'exception' => $e,
-            ]);
         }
+
+        Log::info("Campaign {$campaign->name} completed: {$contactsProcessed} contacts processed, {$campaignProcessed} contacts attempted, {$campaignCalls} calls made");
+
+        return [
+            'processed' => $campaignProcessed,
+            'calls' => $campaignCalls,
+        ];
     }
-
-    Log::info("Campaign {$campaign->name} completed: {$contactsProcessed} contacts processed, {$campaignProcessed} contacts attempted, {$campaignCalls} calls made");
-
-    return [
-        'processed' => $campaignProcessed,
-        'calls' => $campaignCalls,
-    ];
-}
 }

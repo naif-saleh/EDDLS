@@ -20,23 +20,13 @@
                     :current="request()->routeIs('tenant.dashboard', ['tenant' => auth()->user()->tenant->slug])"
                     wire:navigate>{{ __('Dashboard') }}</flux:navlist.item>
             </flux:navlist.group>
-            <flux:navlist.group :heading="__('Systems')" class="grid">
+            <flux:navlist.group :heading="__('Dialer System')" class="grid">
                 <flux:navlist.item icon="phone"
                     :href="route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug])"
                     :current="request()->routeIs('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug])"
                     wire:navigate>
                     {{ __('Dialer System') }}
                 </flux:navlist.item>
-
-                <flux:navlist.item icon="phone-arrow-up-right"
-                    :href="route('tenant.distributor.agents', ['tenant' => auth()->user()->tenant->slug])"
-                    :current="request()->routeIs('tenant.distributor.agents', ['tenant' => auth()->user()->tenant->slug])"
-                    wire:navigate>
-                    {{ __('Distributor System') }}
-                </flux:navlist.item>
-            </flux:navlist.group>
-
-            <flux:navlist.group :heading="__('Skipped Numbers')" class="grid">
                 <flux:navlist.item icon="archive-box-x-mark"
                     :href="route('tenant.dialer.skipped.numbers', ['tenant' => auth()->user()->tenant->slug])"
                     :current="request()->routeIs('tenant.dialer.skipped.numbers', ['tenant' => auth()->user()->tenant->slug])"
@@ -44,6 +34,16 @@
                     {{ __('Dialer Skipped') }}
                 </flux:navlist.item>
 
+            </flux:navlist.group>
+
+            <flux:navlist.group :heading="__('Distributor System')" class="grid">
+
+                <flux:navlist.item icon="phone-arrow-up-right"
+                    :href="route('tenant.distributor.agents', ['tenant' => auth()->user()->tenant->slug])"
+                    :current="request()->routeIs('tenant.distributor.agents', ['tenant' => auth()->user()->tenant->slug])"
+                    wire:navigate>
+                    {{ __('Distributor System') }}
+                </flux:navlist.item>
                 <flux:navlist.item icon="archive-box-x-mark"
                     :href="route('tenant.distributor.skipped.numbers', ['tenant' => auth()->user()->tenant->slug])"
                     :current="request()->routeIs('tenant.distributor.skipped.numbers', ['tenant' => auth()->user()->tenant->slug])"
@@ -51,12 +51,31 @@
                     {{ __('Distributor Skipped') }}
                 </flux:navlist.item>
 
-                <flux:navlist.group :heading="__('integration')" class="grid">
-                <flux:navlist.item icon="home"
-                    :href="route('tenant.integration.form', ['tenant' => auth()->user()->tenant->slug])"
-                    :current="request()->routeIs('tenant.integration.form', ['tenant' => auth()->user()->tenant->slug])"
-                    wire:navigate>{{ __('3CX API ') }}</flux:navlist.item>
-            </flux:navlist.group>
+
+                {{-- 3CX API Credentials --}}
+                <flux:navlist.group :heading="__('Personal')" class="grid">
+                    <flux:navlist.item icon="link"
+                        :href="route('tenant.integration.form', ['tenant' => auth()->user()->tenant->slug])"
+                        :current="request()->routeIs('tenant.integration.form', ['tenant' => auth()->user()->tenant->slug])"
+                        wire:navigate>{{ __('3CX API Credentials ') }}
+                    </flux:navlist.item>
+
+                    {{-- License Information --}}
+                    <flux:navlist.item icon="identification"
+                        :href="route('tenant.license.tenant', ['tenant' => auth()->user()->tenant->slug])"
+                        :current="request()->routeIs('tenant.license.tenant', ['tenant' => auth()->user()->tenant->slug])"
+                        wire:navigate>{{ __('Tenant License Info ') }}
+                    </flux:navlist.item>
+
+                    {{-- Tenant Settings --}}
+                    <flux:navlist.item icon="cog-8-tooth"
+                        :href="route('tenant.settings', ['tenant' => auth()->user()->tenant->slug])"
+                        :current="request()->routeIs('tenant.settings', ['tenant' => auth()->user()->tenant->slug])"
+                        wire:navigate>{{ __('Tenant Settings ') }}
+                    </flux:navlist.item>
+
+
+                </flux:navlist.group>
             </flux:navlist.group>
         </flux:navlist>
 

@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\License;
 use App\Models\Provider;
 use App\Services\LicenseService;
+use App\Services\SystemLogService;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
@@ -40,6 +41,13 @@ class ProvidersList extends Component
 
     public $licenseSevice;
 
+    protected $systemLogService;
+
+    public function boot(SystemLogService $systemLogService)
+    {
+        $this->systemLogService = $systemLogService;
+    }
+
     protected function getLicenseService()
     {
         return new LicenseService;
@@ -49,6 +57,13 @@ class ProvidersList extends Component
     public function updatingSearch()
     {
         $this->resetPage();
+        // Log search action
+        $this->systemLogService->log(
+            logType: 'search',
+            action: 'provider_search',
+            description: 'User searched for providers',
+            metadata: ['search_term' => $this->search]
+        );
     }
 
     // make Sorting
@@ -60,6 +75,17 @@ class ProvidersList extends Component
             $this->sortField = $field;
             $this->sortDirection = 'asc';
         }
+
+        // Log sort action
+        $this->systemLogService->log(
+            logType: 'list_action',
+            action: 'sort_providers',
+            description: 'User sorted providers list',
+            metadata: [
+                'sort_field' => $field,
+                'sort_direction' => $this->sortDirection,
+            ]
+        );
     }
 
     // Create New Provider
@@ -68,6 +94,16 @@ class ProvidersList extends Component
         $licenseService = $this->getLicenseService();
         if (! $licenseService->validProvidersCount(auth()->user()->tenant->id)) {
             Toaster::warning('License Providers limit reached. Please contact support.');
+            // Log license limit reached
+            $this->systemLogService->log(
+                logType: 'license',
+                action: 'license_limit_reached',
+                description: 'User attempted to create a provider but hit license limit',
+                metadata: [
+                    'license_type' => 'provider',
+                    'tenant_id' => auth()->user()->tenant->id,
+                ]
+            );
 
             return;
         }
@@ -89,6 +125,21 @@ class ProvidersList extends Component
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             Toaster::error('Validation failed: '.implode(', ', $e->validator->errors()->all()));
+
+            // Log validation error
+            $this->systemLogService->log(
+                logType: 'validation',
+                action: 'provider_validation_failed',
+                description: 'Provider creation validation failed',
+                metadata: [
+                    'errors' => $e->validator->errors()->all(),
+                    'input' => [
+                        'name' => $this->providerName,
+                        'extension' => $this->providerExtension,
+                        'status' => $this->providerStatus,
+                    ],
+                ]
+            );
 
             return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
         }
@@ -114,6 +165,12 @@ class ProvidersList extends Component
             'provider_type' => 'dialer', // Default value for provider_type
         ]);
 
+        // Log provider creation
+        $this->systemLogService->logCreate(
+            model: $provider,
+            description: "Created new provider: {$provider->name}"
+        );
+
         Toaster::success('Provider is Created Successfully');
 
         return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
@@ -132,6 +189,14 @@ class ProvidersList extends Component
             $this->editMode = true;
 
             $this->dispatch('open-modal'); // open the modal via Livewire event
+
+            // Log edit modal opened
+            $this->systemLogService->log(
+                logType: 'ui_action',
+                action: 'open_edit_modal',
+                model: $provider,
+                description: "Opened edit modal for provider: {$provider->name}"
+            );
         }
     }
 
@@ -153,6 +218,13 @@ class ProvidersList extends Component
                 'status' => $this->providerStatus,
             ]);
 
+            // Log provider update
+            $this->systemLogService->logUpdate(
+                model: $provider,
+                originalAttributes: $originalData,
+                description: "Updated provider: {$provider->name}"
+            );
+
             $this->reset(['editMode', 'editingProviderId', 'providerName', 'providerExtension', 'providerStatus']);
             $this->dispatch('close-modal');
 
@@ -161,6 +233,13 @@ class ProvidersList extends Component
             return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
         } else {
             Toaster::error('Provider not found.');
+
+            // Log error
+            $this->systemLogService->log(
+                logType: 'error',
+                action: 'provider_not_found',
+                description: "Attempted to update non-existent provider ID: {$this->editingProviderId}"
+            );
 
             return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
         }
@@ -173,6 +252,12 @@ class ProvidersList extends Component
 
         if (! $provider) {
             Toaster::error('Provider not found.');
+            // Log error
+            $this->systemLogService->log(
+                logType: 'error',
+                action: 'provider_not_found',
+                description: "Attempted to toggle status of non-existent provider ID: {$id}"
+            );
 
             return;
         }
@@ -181,12 +266,32 @@ class ProvidersList extends Component
             'status' => $isChecked ? 'active' : 'inactive',
         ]);
 
+        // Log status change
+        $this->systemLogService->log(
+            logType: 'status_change',
+            action: 'provider_status_changed',
+            model: $provider,
+            description: 'Provider status changed',
+            previousData: ['status' => $originalStatus],
+            newData: ['status' => $newStatus]
+        );
+
         Toaster::success('provider status updated successfully.');
     }
 
     public function confirmDelete($providerId)
     {
         $this->confirmingDeleteId = $providerId;
+        // Log delete confirmation
+        $provider = Provider::find($providerId);
+        if ($provider) {
+            $this->systemLogService->log(
+                logType: 'ui_action',
+                action: 'confirm_delete',
+                model: $provider,
+                description: "User initiated delete confirmation for provider: {$provider->name}"
+            );
+        }
     }
 
     public function deleteTenant()
@@ -194,6 +299,11 @@ class ProvidersList extends Component
         $provider = Provider::find($this->confirmingDeleteId);
 
         if ($provider) {
+            // Log before deletion
+            $this->systemLogService->logDelete(
+                model: $provider,
+                description: "Deleted provider: {$provider->name}"
+            );
             $provider->delete();
             Toaster::success('Provider deleted successfully.');
             $licenseService = $this->getLicenseService();
@@ -203,6 +313,13 @@ class ProvidersList extends Component
             return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
         } else {
             Toaster::error('Provider not found.');
+
+            // Log error
+            $this->systemLogService->log(
+                logType: 'error',
+                action: 'provider_not_found',
+                description: "Attempted to delete non-existent provider ID: {$this->confirmingDeleteId}"
+            );
 
             return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
         }
@@ -215,16 +332,17 @@ class ProvidersList extends Component
         // Initialize provider query
         $query = Provider::query()->where('tenant_id', auth()->user()->tenant->id);
 
-        // Apply search if provided
+        // Apply search if provided - with proper grouping
         if ($this->search) {
-            $query->where('name', 'like', '%'.$this->search.'%')
-                ->orWhere('extension', 'like', '%'.$this->search.'%')
-                ->orWhere('status', 'like', '%'.$this->search.'%');
+            $query->where(function ($q) {
+                $q->where('name', 'like', '%'.$this->search.'%')
+                    ->orWhere('extension', 'like', '%'.$this->search.'%')
+                    ->orWhere('status', 'like', '%'.$this->search.'%');
+            });
         }
 
-        // Filter providers by the current user's tenant
-        $query
-            ->orderBy($this->sortField, $this->sortDirection);
+        // Apply sorting
+        $query->orderBy($this->sortField, $this->sortDirection);
 
         // Get providers with pagination
         $providers = $query->paginate($this->perPage);
@@ -245,6 +363,20 @@ class ProvidersList extends Component
         }
 
         $license = License::where('tenant_id', auth()->user()->tenant_id)->first();
+
+        // Log page view (only on initial load, not on Livewire updates)
+        if (! request()->wantsJson()) {
+            $this->systemLogService->log(
+                logType: 'page_view',
+                action: 'providers_list_view',
+                description: 'User viewed providers list',
+                metadata: [
+                    'tenant_id' => auth()->user()->tenant->id,
+                    'providers_count' => $providers->total(),
+                    'page' => $providers->currentPage(),
+                ]
+            );
+        }
 
         return view('livewire.systems.dialer.providers-list', [
             'providers' => $providers,

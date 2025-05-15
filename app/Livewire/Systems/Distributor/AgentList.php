@@ -98,6 +98,7 @@ class AgentList extends Component
 
         if (! $agent) {
             Toaster::error('Agent not found.');
+
             return;
         }
 
@@ -108,6 +109,7 @@ class AgentList extends Component
             if (! $licenseService->validAgentsCount($this->tenant_id)) {
                 Toaster::warning('License Agents limit reached. Please contact support.');
                 $this->dispatch('revertCheckbox', agentId: $id, currentStatus: $agent->status === 'active');
+
                 return;
             }
             $agent->update(['status' => 'active']);
@@ -122,21 +124,29 @@ class AgentList extends Component
 
     public function render()
     {
-        $query = Agent::query()->where('tenant_id', $this->tenant_id);
-        if ($this->search) {
-            $query->where('name', 'like', '%'.$this->search.'%')
-                ->orWhere('extension', 'like', '%'.$this->search.'%')
-                ->orWhere('status', 'like', '%'.$this->search.'%')
-                ->orderBy($this->sortField, $this->sortDirection);
-        }
-        $query->orderBy($this->sortField, $this->sortDirection);
-        $agents = $query->paginate($this->perPage);
+        $query = Agent::query();
 
+        // Always filter by tenant_id first
+        $query->where('tenant_id', $this->tenant_id);
+
+        // Group the search conditions
+        if ($this->search) {
+            $query->where(function ($q) {
+                $q->where('name', 'like', '%'.$this->search.'%')
+                    ->orWhere('extension', 'like', '%'.$this->search.'%')
+                    ->orWhere('status', 'like', '%'.$this->search.'%');
+            });
+        }
+
+        // Apply sorting
+        $query->orderBy($this->sortField, $this->sortDirection);
+
+        $agents = $query->paginate($this->perPage);
         $license = License::where('tenant_id', $this->tenant_id)->first();
 
         return view('livewire.systems.distributor.agent-list', [
             'agents' => $agents,
-            'license' => $license
+            'license' => $license,
         ]);
     }
 }

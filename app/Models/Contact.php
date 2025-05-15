@@ -39,6 +39,7 @@ class Contact extends Model
         'start_calling' => 'datetime',
         'end_calling' => 'datetime',
         'additional_data' => 'json',
+        'status' => 'string',
     ];
 
      /**

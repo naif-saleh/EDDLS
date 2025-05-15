@@ -38,6 +38,12 @@ class Tenant extends Model
         return $this->hasMany(Agent::class);
     }
 
+
+    public function setting()
+    {
+        return $this->hasOne(Setting::class);
+    }
+    
     public function campaigns()
     {
         return $this->hasMany(Campaign::class);
