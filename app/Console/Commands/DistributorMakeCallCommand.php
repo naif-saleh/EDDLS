@@ -325,69 +325,63 @@ class DistributorMakeCallCommand extends Command
                     // Make the actual call through the agent
                     Log::info("Initiating call to {$contact->phone_number} via agent {$agent->name} (Extension: {$agent->extension})");
                     $callResponse = $threeCxService->makeCallDist($agent, $contact->phone_number);
-
+// Mark contact as calling only after successful call initiation
+                                     $contact->markAsCalling();
                     // Log the raw response for debugging
                     Log::debug('Raw call response:', ['response' => $callResponse]);
 
                     // Add a short delay to ensure the call is registered in the system
                     usleep(500000); // 500ms delay
 
-                    // Refresh active calls to get latest call ID
-                    $refreshCallsResponse = $threeCxService->getActiveCallsForProvider($agent->extension);
-
-                    // Log the raw response for debugging
-                    Log::debug('Active calls response:', ['response' => $refreshCallsResponse]);
-
                     $callId = null;
                     $callStatus = null;
 
-                    // Make sure we have a valid response and the Value key exists
-                    if (is_array($refreshCallsResponse) && isset($refreshCallsResponse['Value'])) {
-                        if (is_array($refreshCallsResponse['Value']) && ! empty($refreshCallsResponse['Value'])) {
-                            // Check if Value is an indexed array
-                            if (isset($refreshCallsResponse['Value'][0])) {
-                                $activeCall = $refreshCallsResponse['Value'][0];
+                    if (is_array($callResponse) && isset($callResponse['result'])) {
+                        if (is_array($callResponse['result']) && ! empty($callResponse['result'])) {
+                            // Check if result is an indexed array
+                            if (isset($callResponse['result'][0])) {
+                                $activeCall = $callResponse['result'][0];
                                 $callId = $activeCall['Id'] ?? null;
                                 $callStatus = $activeCall['Status'] ?? null;
+
+                                if ($callId) {
+                                    Log::info("Updated active call - Call ID: {$callId}, Status: {$callStatus}");
+
+                                    
+
+                                    // Log call details
+                                    $callLog = CallLog::create([
+                                        'call_id' => $callId,
+                                        'campaign_id' => $campaign->id,
+                                        'provider_id' => $provider->id,
+                                        'agent_id' => $agent->id,
+                                        'contact_id' => $contact->id,
+                                        'call_status' => $callStatus ?? 'initiated',
+                                        'call_type' => 'distributor',
+                                        'called_at' => now(),
+                                    ]);
+
+                                    Log::info("CallLog created with Call ID: {$callId}, Status: {$callStatus}");
+                                    $campaignCalls++;
+
+                                    Log::info("Call initiated: {$contact->phone_number} for tenant {$tenant->id}, agent {$agent->id}, campaign {$campaign->id}");
+
+                                    // Add delay between calls for rate limiting
+                                    usleep($this->callDelay);
+                                } else {
+                                    // Call initiation failed or could not get call ID
+                                    Log::error("Failed to initiate call or get call ID for {$contact->phone_number} for tenant {$tenant->id}");
+                                    Log::error('API may not have returned expected response format');
+                                }
                             }
                             // Check if Value is an associative array (direct object)
-                            elseif (isset($refreshCallsResponse['Value']['Id'])) {
-                                $callId = $refreshCallsResponse['Value']['Id'];
-                                $callStatus = $refreshCallsResponse['Value']['Status'] ?? 'unknown';
+                            elseif (isset($callResponse['Value']['Id'])) {
+                                $callId = $callResponse['Value']['Id'];
+                                $callStatus = $callResponse['Value']['Status'] ?? 'unknown';
                             }
                         }
                     }
 
-                    if ($callId) {
-                        Log::info("Updated active call - Call ID: {$callId}, Status: {$callStatus}");
-
-                        // Mark contact as calling only after successful call initiation
-                        // $contact->markAsCalling();
-
-                        // Log call details
-                        $callLog = CallLog::create([
-                            'call_id' => $callId,
-                            'campaign_id' => $campaign->id,
-                            'provider_id' => $provider->id,
-                            'agent_id' => $agent->id,
-                            'contact_id' => $contact->id,
-                            'call_status' => $callStatus ?? 'initiated',
-                            'call_type' => 'distributor',
-                            'called_at' => now(),
-                        ]);
-
-                        Log::info("CallLog created with Call ID: {$callId}, Status: {$callStatus}");
-                        $campaignCalls++;
-
-                        Log::info("Call initiated: {$contact->phone_number} for tenant {$tenant->id}, agent {$agent->id}, campaign {$campaign->id}");
-
-                        // Add delay between calls for rate limiting
-                        usleep($this->callDelay);
-                    } else {
-                        // Call initiation failed or could not get call ID
-                        Log::error("Failed to initiate call or get call ID for {$contact->phone_number} for tenant {$tenant->id}");
-                        Log::error('API may not have returned expected response format');
-                    }
                 } else {
                     Log::error("Tenant {$tenant->name}: License validation failed. Cannot make calls.");
                 }

@@ -50,10 +50,9 @@ class CradentialsForm extends Component
         );
 
         if ($this->cradentials) {
-            session()->flash('success', 'Credentials Updated Successfully');
-
+            Toaster::success('Credentials Updated Successfully');
         } else {
-            session()->flash('success', 'Credentials Created Successfully');
+            Toaster::success('Credentials Created Successfully');
         }
 
     }

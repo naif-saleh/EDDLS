@@ -27,6 +27,12 @@
                     wire:navigate>
                     {{ __('Dialer System') }}
                 </flux:navlist.item>
+                <flux:navlist.item icon="phone"
+                    :href="route('tenant.dialer.calls.report', ['tenant' => auth()->user()->tenant->slug])"
+                    :current="request()->routeIs('tenant.dialer.calls.report', ['tenant' => auth()->user()->tenant->slug])"
+                    wire:navigate>
+                    {{ __('Calls Report') }}
+                </flux:navlist.item>
                 <flux:navlist.item icon="archive-box-x-mark"
                     :href="route('tenant.dialer.skipped.numbers', ['tenant' => auth()->user()->tenant->slug])"
                     :current="request()->routeIs('tenant.dialer.skipped.numbers', ['tenant' => auth()->user()->tenant->slug])"
@@ -73,6 +79,17 @@
                         :current="request()->routeIs('tenant.settings', ['tenant' => auth()->user()->tenant->slug])"
                         wire:navigate>{{ __('Tenant Settings ') }}
                     </flux:navlist.item>
+
+                    @if (auth()->check() && auth()->user()->isTenantAdmin())
+                        {{-- Manage Employees --}}
+                    <flux:navlist.item icon="user-group"
+                        :href="route('tenant.employees.list', ['tenant' => auth()->user()->tenant->slug])"
+                        :current="request()->routeIs('tenant.employees.list', ['tenant' => auth()->user()->tenant->slug])"
+                        wire:navigate>{{ __('Manage Employees ') }}
+                    </flux:navlist.item>
+
+                    @endif
+                   
 
 
                 </flux:navlist.group>

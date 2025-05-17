@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\Campaign;
 use App\Models\Provider;
 use App\Models\SkippedNumber;
+use App\Services\LicenseService;
 use Generator;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -39,6 +40,10 @@ class DistProcessCsvContactFile implements ShouldQueue
 
     protected $providerCache = [];
 
+    // Cache license validation results
+    protected $providerLicenseValid = null;
+    protected $campaignLicenseValid = null;
+
     /**
      * Create a new job instance.
      */
@@ -55,11 +60,32 @@ class DistProcessCsvContactFile implements ShouldQueue
      */
     public function handle()
     {
+        $licenseService = new LicenseService;
         Log::info("Starting agent-based CSV import for batch: {$this->batchId}, file: {$this->fileName}");
+
+        // Validate licenses upfront to avoid repeated checks during processing
+        $this->providerLicenseValid = $licenseService->validProvidersCount($this->tenantId);
+        $this->campaignLicenseValid = $licenseService->validCampaignsCount($this->tenantId);
+
+        // Log license validation results
+        if (!$this->providerLicenseValid) {
+            Log::error("Tenant {$this->tenantId}: License validation failed for providers. Cannot process CSV import.");
+        }
+
+        if (!$this->campaignLicenseValid) {
+            Log::error("Tenant {$this->tenantId}: License validation failed for campaigns. Cannot process CSV import.");
+        }
+
+        // Exit early if either license check fails
+        if (!$this->providerLicenseValid || !$this->campaignLicenseValid) {
+            if (file_exists($this->filePath)) {
+                unlink($this->filePath);
+            }
+            return;
+        }
 
         if (! file_exists($this->filePath)) {
             Log::error("File not found: {$this->filePath}");
-
             return;
         }
 
@@ -70,7 +96,6 @@ class DistProcessCsvContactFile implements ShouldQueue
         if (empty($this->agentCache)) {
             Log::error("No agents found for tenant {$this->tenantId}. CSV import canceled.");
             unlink($this->filePath);
-
             return;
         }
 
@@ -83,12 +108,11 @@ class DistProcessCsvContactFile implements ShouldQueue
             $header = $this->validateHeaderRow();
             if (! $header) {
                 unlink($this->filePath);
-
                 return;
             }
 
             // Process the file in chunks
-            foreach ($this->getChunkedData($header) as $chunk) {
+            foreach ($this->getChunkedData($header, $licenseService) as $chunk) {
                 if (empty($chunk['data'])) {
                     continue;
                 }
@@ -144,7 +168,6 @@ class DistProcessCsvContactFile implements ShouldQueue
         $file = fopen($this->filePath, 'r');
         if (! $file) {
             Log::error("Could not open file: {$this->filePath}");
-
             return null;
         }
 
@@ -154,7 +177,6 @@ class DistProcessCsvContactFile implements ShouldQueue
 
         if (! $header) {
             Log::error("Empty or invalid CSV file: {$this->filePath}");
-
             return null;
         }
 
@@ -166,7 +188,6 @@ class DistProcessCsvContactFile implements ShouldQueue
         foreach ($requiredColumns as $column) {
             if (! in_array($column, $header)) {
                 Log::error("Missing required column '{$column}' in CSV file");
-
                 return null;
             }
         }
@@ -177,7 +198,7 @@ class DistProcessCsvContactFile implements ShouldQueue
     /**
      * Generate chunks of data from the CSV file
      */
-    protected function getChunkedData(array $header): Generator
+    protected function getChunkedData(array $header, $licenseService): Generator
     {
         $file = fopen($this->filePath, 'r');
 
@@ -194,9 +215,9 @@ class DistProcessCsvContactFile implements ShouldQueue
             // Skip empty rows
             if (empty($row) || count(array_filter($row)) === 0) {
                 $skippedInChunk++;
-
                 continue;
             }
+
             $partialData = array_combine(
                 array_slice($header, 0, min(count($header), count($row))),
                 array_slice($row, 0, min(count($header), count($row)))
@@ -227,25 +248,25 @@ class DistProcessCsvContactFile implements ShouldQueue
                     $campaignId = $campaign->id;
                 }
             }
+
             // Check if row count matches header count
             if (count($row) !== count($header)) {
                 Log::warning("Skipping malformed row at line {$rowNumber} mobile ");
                 try {
                     $this->saveSkippedNumber(
-                        $data['phone_number'] ?? 'unknown',
+                        $partialData['phone_number'] ?? 'unknown',
                         $providerId ?? null,
-                        $agentId ?? null,
+                        null,
                         $campaignId ?? null,
                         "Skipping malformed row at line {$rowNumber} mobile ",
-                        $data['file_name'] ?? null,
+                        $partialData['file_name'] ?? null,
                         $rowNumber,
-                        $data ?? []
+                        $partialData ?? []
                     );
                 } catch (\Exception $saveEx) {
                     Log::error('Error saving skipped number: '.$saveEx->getMessage());
                 }
                 $skippedInChunk++;
-
                 continue;
             }
 
@@ -260,7 +281,7 @@ class DistProcessCsvContactFile implements ShouldQueue
                     $this->saveSkippedNumber(
                         $data['phone_number'] ?? 'unknown',
                         $providerId ?? null,
-                        $agentId ?? null,
+                        null,
                         $campaignId ?? null,
                         "File name is missing row at line {$rowNumber} mobile ".$data['phone_number'],
                         $data['file_name'] ?? null,
@@ -271,7 +292,6 @@ class DistProcessCsvContactFile implements ShouldQueue
                     Log::error('Error saving skipped number: '.$saveEx->getMessage());
                 }
                 $skippedInChunk++;
-
                 continue;
             } elseif (empty($data['provider_name'])) {
                 Log::warning("Provider name is missing row at line {$rowNumber} mobile ".$data['phone_number']);
@@ -281,7 +301,7 @@ class DistProcessCsvContactFile implements ShouldQueue
                     $this->saveSkippedNumber(
                         $data['phone_number'] ?? 'unknown',
                         $providerId ?? null,
-                        $agentId ?? null,
+                        null,
                         $campaignId ?? null,
                         "Provider name is missing row at line {$rowNumber} mobile ".$data['phone_number'],
                         $data['file_name'] ?? null,
@@ -291,19 +311,18 @@ class DistProcessCsvContactFile implements ShouldQueue
                 } catch (\Exception $saveEx) {
                     Log::error('Error saving skipped number: '.$saveEx->getMessage());
                 }
-
                 continue;
             } elseif (empty($data['provider_extension'])) {
-                Log::warning("Provider extensio is missing row at line {$rowNumber} mobile ".$data['phone_number']);
+                Log::warning("Provider extension is missing row at line {$rowNumber} mobile ".$data['phone_number']);
                 $skippedInChunk++;
                 // Track skipped row with processing error
                 try {
                     $this->saveSkippedNumber(
                         $data['phone_number'] ?? 'unknown',
                         $providerId ?? null,
-                        $agentId ?? null,
+                        null,
                         $campaignId ?? null,
-                        "Provider extensio is missing row at line {$rowNumber} mobile ".$data['phone_number'],
+                        "Provider extension is missing row at line {$rowNumber} mobile ".$data['phone_number'],
                         $data['file_name'] ?? null,
                         $rowNumber,
                         $data ?? []
@@ -311,7 +330,6 @@ class DistProcessCsvContactFile implements ShouldQueue
                 } catch (\Exception $saveEx) {
                     Log::error('Error saving skipped number: '.$saveEx->getMessage());
                 }
-
                 continue;
             } elseif (empty($data['agent_extension'])) {
                 Log::warning("Agent extension is missing row at line {$rowNumber} mobile ".$data['phone_number']);
@@ -321,7 +339,7 @@ class DistProcessCsvContactFile implements ShouldQueue
                     $this->saveSkippedNumber(
                         $data['phone_number'] ?? 'unknown',
                         $providerId ?? null,
-                        $agentId ?? null,
+                        null,
                         $campaignId ?? null,
                         "Agent extension is missing row at line {$rowNumber} mobile ".$data['phone_number'],
                         $data['file_name'] ?? null,
@@ -331,7 +349,6 @@ class DistProcessCsvContactFile implements ShouldQueue
                 } catch (\Exception $saveEx) {
                     Log::error('Error saving skipped number: '.$saveEx->getMessage());
                 }
-
                 continue;
             }
 
@@ -345,7 +362,7 @@ class DistProcessCsvContactFile implements ShouldQueue
                     $this->saveSkippedNumber(
                         $data['phone_number'] ?? 'unknown',
                         $providerId ?? null,
-                        $agentId ?? null,
+                        null,
                         $campaignId ?? null,
                         "Agent with extension {$agentExtension} not found. Skipping row {$rowNumber}",
                         $data['file_name'] ?? null,
@@ -355,7 +372,6 @@ class DistProcessCsvContactFile implements ShouldQueue
                 } catch (\Exception $saveEx) {
                     Log::error('Error saving skipped number: '.$saveEx->getMessage());
                 }
-
                 continue;
             }
 
@@ -363,8 +379,15 @@ class DistProcessCsvContactFile implements ShouldQueue
             $fileName = $data['file_name'];
             $providerName = $data['provider_name'];
             $providerExtension = $data['provider_extension'];
+
             // Get campaign ID (create if needed)
             $campaignId = $this->getCampaignId($fileName, $providerName, $providerExtension, $agentId, $data);
+
+            // Skip if campaign couldn't be created due to license issues
+            if ($campaignId === null) {
+                $skippedInChunk++;
+                continue;
+            }
 
             // Add to chunk
             $chunk[] = [
@@ -411,38 +434,79 @@ class DistProcessCsvContactFile implements ShouldQueue
         $campaignKey = $fileName.'|'.$agentId;
 
         if (! isset($this->campaignCache[$campaignKey])) {
+            // If campaign license is not valid, return null
+            if (!$this->campaignLicenseValid) {
+                return null;
+            }
+
             // Get provider first (or create it)
             $providerId = $this->getProviderId($providerName, $providerExtension);
 
-            // Create or get campaign using transaction to prevent race conditions
-            DB::beginTransaction();
-            try {
-                $campaign = Campaign::firstOrCreate(
-                    [
-                        'name' => $fileName, 'agent_id' => $agentId,
-                        'slug' => Str::slug($fileName.'-'.$agentId),
-                    ],
-                    [
-                        'tenant_id' => $this->tenantId,
-                        'provider_id' => $providerId,
-                        'agent_id' => $agentId,
-                        'name' => $fileName,
-                        'start_time' => $data['start_time'],
-                        'end_time' => $data['end_time'],
-                        'campaign_type' => 'distributor',
-                    ]
-                );
-                DB::commit();
+            // If provider creation failed, return null
+            if ($providerId === null) {
+                return null;
+            }
 
-                $this->campaignCache[$campaignKey] = $campaign->id;
-            } catch (\Exception $e) {
-                DB::rollBack();
-                Log::error('Error creating campaign: '.$e->getMessage());
-                throw $e;
+            // Use shorter transaction with retry logic to reduce lock contention
+            $maxRetries = 3;
+            $retryCount = 0;
+            $campaign = null;
+
+            while ($retryCount < $maxRetries) {
+                try {
+                    DB::beginTransaction();
+
+                    // First try to find the campaign
+                    $campaign = Campaign::where('name', $fileName)
+                        ->where('agent_id', $agentId)
+                        ->first();
+
+                    if (!$campaign) {
+                        $campaign = Campaign::create([
+                            'tenant_id' => $this->tenantId,
+                            'provider_id' => $providerId,
+                            'agent_id' => $agentId,
+                            'name' => $fileName,
+                            'slug' => Str::slug($fileName.'-'.$agentId),
+                            'start_time' => $data['start_time'],
+                            'end_time' => $data['end_time'],
+                            'campaign_type' => 'distributor',
+                        ]);
+                    }
+
+                    DB::commit();
+                    $this->campaignCache[$campaignKey] = $campaign->id;
+                    break;
+                } catch (\Exception $e) {
+                    DB::rollBack();
+                    $retryCount++;
+
+                    if ($retryCount >= $maxRetries) {
+                        Log::error('Failed to create/get campaign after multiple attempts: ' . $e->getMessage());
+                        return null;
+                    }
+
+                    // Exponential backoff
+                    usleep(($retryCount * 100) * 1000);
+
+                    // Try to fetch after exception in case another process created it
+                    try {
+                        $campaign = Campaign::where('name', $fileName)
+                            ->where('agent_id', $agentId)
+                            ->first();
+
+                        if ($campaign) {
+                            $this->campaignCache[$campaignKey] = $campaign->id;
+                            break;
+                        }
+                    } catch (\Exception $fetchEx) {
+                        // Continue to retry
+                    }
+                }
             }
         }
 
-        return $this->campaignCache[$campaignKey];
+        return $this->campaignCache[$campaignKey] ?? null;
     }
 
     /**
@@ -453,49 +517,77 @@ class DistProcessCsvContactFile implements ShouldQueue
         $cacheKey = $providerName.'|'.$providerExtension;
 
         if (! isset($this->providerCache[$cacheKey])) {
+            // If provider license is not valid, return null
+            if (!$this->providerLicenseValid) {
+                return null;
+            }
+
             // First try to find by name and extension
             $provider = Provider::where('name', $providerName)
                 ->where('tenant_id', $this->tenantId)
                 ->first();
 
-            if (! $provider) {
-                // Then try by extension if available
-                if (! empty($providerExtension)) {
-                    $provider = Provider::where('extension', $providerExtension)
-                        ->where('tenant_id', $this->tenantId)
-                        ->first();
-                }
+            if (! $provider && ! empty($providerExtension)) {
+                $provider = Provider::where('extension', $providerExtension)
+                    ->where('tenant_id', $this->tenantId)
+                    ->first();
+            }
 
-                // If still not found, create a new provider
-                if (! $provider) {
+            if (! $provider) {
+                // Use shorter transaction with retry logic to reduce lock contention
+                $maxRetries = 3;
+                $retryCount = 0;
+
+                while ($retryCount < $maxRetries) {
                     try {
                         DB::beginTransaction();
+                        $slug = Str::slug($providerName);
                         $provider = Provider::create([
                             'tenant_id' => $this->tenantId,
-                            'slug' => Str::slug($providerName),
+                            'slug' => $slug,
                             'name' => $providerName,
-                            'extension' => $providerExtension ?: null, // Use null if empty
+                            'extension' => $providerExtension ?: null,
                         ]);
                         DB::commit();
+
+                        Log::info("Tenant {$this->tenantId}: Created new provider: {$providerName} ({$providerExtension}) with slug: {$slug}, ID: {$provider->id}");
+                        break;
                     } catch (\Exception $e) {
                         DB::rollBack();
-                        Log::error('Error creating provider: '.$e->getMessage());
-                        // Try to find it again in case it was created in another process
-                        $provider = Provider::where('name', $providerName)
-                            ->where('tenant_id', $this->tenantId)
-                            ->first();
+                        $retryCount++;
 
-                        if (! $provider) {
-                            throw $e;
+                        if ($retryCount >= $maxRetries) {
+                            Log::error('Failed to create provider after multiple attempts: ' . $e->getMessage());
+                            return null;
+                        }
+
+                        // Exponential backoff
+                        usleep(($retryCount * 100) * 1000);
+
+                        // Try to fetch after exception in case another process created it
+                        try {
+                            $provider = Provider::where('name', $providerName)
+                                ->where('tenant_id', $this->tenantId)
+                                ->first();
+
+                            if ($provider) {
+                                break;
+                            }
+                        } catch (\Exception $fetchEx) {
+                            // Continue to retry
                         }
                     }
                 }
             }
 
-            $this->providerCache[$cacheKey] = $provider->id;
+            if ($provider) {
+                $this->providerCache[$cacheKey] = $provider->id;
+            } else {
+                return null;
+            }
         }
 
-        return $this->providerCache[$cacheKey];
+        return $this->providerCache[$cacheKey] ?? null;
     }
 
     /**
@@ -532,8 +624,7 @@ class DistProcessCsvContactFile implements ShouldQueue
             ]);
         } catch (\Exception $e) {
             Log::error('Error saving skipped number: '.$e->getMessage());
-            // Don't throw, just log - we don't want to interrupt the import process
-        }
+         }
     }
 
     /**

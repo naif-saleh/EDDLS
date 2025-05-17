@@ -22,13 +22,15 @@ use App\Livewire\Systems\Campaign\DialerCampaignUpdate;
 use App\Livewire\Systems\Campaign\DistributorCampaignsDetails;
 use App\Livewire\Systems\Campaign\DistributorCampaignsForm;
 use App\Livewire\Systems\Campaign\DistributorCampaignsList;
+use App\Livewire\Systems\Dialer\DialerCallsReport;
 use App\Livewire\Systems\Dialer\ProvidersList;
 use App\Livewire\Systems\Distributor\AgentList;
 use App\Livewire\Systems\Distributor\ProvidersList as DistributorProvidersList;
 use App\Livewire\Systems\SkippedNumbers\DialerSkippedNumbers;
 use App\Livewire\Systems\SkippedNumbers\DistributorSkippedNumbers;
+use App\Livewire\Tenant\EmployeeForm;
+use App\Livewire\Tenant\EmployeeList;
 use App\Livewire\Users\UserList;
-use App\Models\ApiIntegration;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -49,61 +51,60 @@ Route::middleware(['auth'])->group(function () {
 
 // Admin Routes
 Route::prefix('admin')->name('admin.')->middleware('only.admin')->group(function () {
-    //Admin Dashboard
+    // Admin Dashboard
     Route::get('dashboard', AdminStats::class)->name('dashboard');
 
-    //Tenant Route
+    // Tenant Route
     Route::get('tenant-list', TenantList::class)->name('tenant.list');
 
-    //Users Route
+    // Users Route
     Route::get('users-list', UserList::class)->name('user.list');
 
-    //License Route
+    // License Route
     Route::get('licesnse-list/', LicenseList::class)->name('license.list');
     Route::get('licesnse-form/{tenant_id}', LicenseForm::class)->name('license.form');
     Route::get('licesnse-content/{license_id}', LicenseContent::class)->name('license.content');
     Route::get('licesnse-update/{license_id}', LicenseUpdate::class)->name('license.update');
 
-
-
 });
 
 // Tenant routes with tenant middleware
 Route::prefix('tenant/{tenant:slug}')->name('tenant.')->middleware(['auth', 'tenant.access'])->group(function () {
-    //Api Integration
+    // Api Integration
     Route::get('/api-integration', CradentialsForm::class)->name('integration.form');
 
-    //License View
+    // License View
     Route::get('licesnse-information', LicenseForTenant::class)->name('license.tenant');
 
-    //System Log
+    // System Log
     Route::get('system-log-view', TenantLog::class)->name('system.log');
 
-    //Tenant Settings
-        Route::get('settings', TenantSettings::class)->name('settings');
+    // Tenant Settings
+    Route::get('settings', TenantSettings::class)->name('settings');
 
-
+    // Manage Employees
+    Route::get('manage-employees', EmployeeList::class)->name('employees.list');
+    Route::get('manage-employees/create-employee', EmployeeForm::class)->name('employees.create');
 
     Route::get('/dashboard', AgentStats::class)->name('dashboard');
     // Dialer Routes
     Route::get('/dialer/providers', ProvidersList::class)->name('dialer.providers');
     Route::get('/dialer/provider/{provider}/campaigns-list', DialerCampaignsList::class)->name('dialer.provider.campaigns.list');
     Route::get('/dialer/provider/{provider}/campaign-create', DialerCampaignForm::class)->name('dialer.provider.campaigns.create');
-    Route::get('/dialer/provider/{provider}/campaign/{campaign:slug}/contact',DialerCampaignDetails::class)->name('dialer.provider.campaign.contact');
-    Route::get('/dialer/provider/{provider}/campaign/{campaign:slug}/edit-campaign',DialerCampaignUpdate::class)->name('dialer.provider.campaign.edit');
-    Route::get('/dialer/skipped-numbers',DialerSkippedNumbers::class)->name('dialer.skipped.numbers');
+    Route::get('/dialer/provider/{provider}/campaign/{campaign:slug}/contact', DialerCampaignDetails::class)->name('dialer.provider.campaign.contact');
+    Route::get('/dialer/provider/{provider}/campaign/{campaign:slug}/edit-campaign', DialerCampaignUpdate::class)->name('dialer.provider.campaign.edit');
+    Route::get('/dialer/skipped-numbers', DialerSkippedNumbers::class)->name('dialer.skipped.numbers');
+    Route::get('/dialer/calls-report', DialerCallsReport::class)->name('dialer.calls.report');
 
-    //Distributor Routes
+    // Distributor Routes
     Route::get('/distributor/agents', AgentList::class)->name('distributor.agents');
     Route::get('/distributor/{agent}/providers', DistributorProvidersList::class)->name('distributor.providers');
     Route::get('/distributor/provider/{provider}/agent/{agent}/campaigns', DistributorCampaignsList::class)->name('distributor.provider.campaigns.list');
     Route::get('/distributor/provider/{provider}/agent/{agent}/campaign-create', DistributorCampaignsForm::class)->name('distributor.provider.campaigns.create');
-    Route::get('/distributor/provider/{provider}/agent/{agent}/campaign/{campaign:slug}/contact',DistributorCampaignsDetails::class)->name('distributor.provider.campaign.contact');
-    Route::get('/distributor/skipped-numbers',DistributorSkippedNumbers::class)->name('distributor.skipped.numbers');
+    Route::get('/distributor/provider/{provider}/agent/{agent}/campaign/{campaign:slug}/contact', DistributorCampaignsDetails::class)->name('distributor.provider.campaign.contact');
+    Route::get('/distributor/skipped-numbers', DistributorSkippedNumbers::class)->name('distributor.skipped.numbers');
 
 });
-
-
 
 Route::prefix('api/skipped-numbers')->group(function () {
     Route::get('/by-provider', [SkippedNumbersReportController::class, 'getGroupedByProvider']);

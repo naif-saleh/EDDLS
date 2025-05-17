@@ -19,7 +19,7 @@ return new class extends Migration
             $table->boolean('is_ready_calling')->default(false);
             $table->foreignId('campaign_id')->constrained()->onDelete('cascade');
             $table->string('phone_number');
-            $table->enum('status', ['new', 'calling', 'answer', 'no_answer'])->default('new');
+            $table->enum('status', ['new', 'calling', 'called', 'Routing', 'Talking', 'Rerouting'])->default('new');
             $table->dateTime('start_calling')->nullable();
             $table->dateTime('end_calling')->nullable();
             $table->integer('attempt_count')->default(0);

@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Models\ApiIntegration;
+use App\Models\CallLog;
+use App\Models\Contact;
 
 class ThreeCXIntegrationService
 {
@@ -320,67 +322,80 @@ class ThreeCXIntegrationService
         return collect($devices)->firstWhere('user_agent', '3CX Mobile Client');
     }
 
+/**
+ * Update call record in database with consistent format
+ * 
+ * @param string $callId The ID of the call to update
+ * @param string $status The current status of the call
+ * @param array $callsData The array containing call data
+ * @return mixed
+ */
+public function updateCallRecord($callId, $status, $callsData)
+{
+    $talking_duration = null;
+    $dial_duration = null;
+    $currentDuration = null;
+    
+    // Find the specific call data in the array
+    $callData = null;
+    foreach ($callsData as $call) {
+        if (isset($call['Id']) && $call['Id'] == $callId) {
+            $callData = $call;
+            break;
+        }
+    }
 
-//     /**
-//      * Update call record in database with consistent format
-//      */
-//     public function updateCallRecord($callId, $status, $call)
-//     {
-//         $duration_time = null;
-//         $duration_routing = null;
-//         $currentDuration = null;
+    // Calculate durations if call data is found
+    if ($callData && isset($callData['EstablishedAt']) && isset($callData['ServerNow'])) {
+        $establishedAt = Carbon::parse($callData['EstablishedAt']);
+        $serverNow = Carbon::parse($callData['ServerNow']);
+        $currentDuration = $establishedAt->diff($serverNow)->format('%H:%I:%S');
+        
+        // Retrieve existing record to preserve any existing durations
+        $existingRecord = CallLog::where('call_id', $callId)->first();
 
-//         // Calculate durations if call data is provided
-//         if ($call && isset($call['EstablishedAt'], $call['ServerNow'])) {
-//             $establishedAt = Carbon::parse($call['EstablishedAt']);
-//             $serverNow = Carbon::parse($call['ServerNow']);
-//             $currentDuration = $establishedAt->diff($serverNow)->format('%H:%I:%S');
+        if ($existingRecord) {
+            // Update durations based on current status
+            switch ($status) {
+                case 'Talking':
+                    $talking_duration = $currentDuration;
+                    $dial_duration = $existingRecord->dial_duration;
+                    break;
+                case 'Routing':
+                    $dial_duration = $currentDuration;
+                    $talking_duration = $existingRecord->talking_duration;
+                    break;
+                default:
+                    $talking_duration = $existingRecord->talking_duration;
+                    $dial_duration = $existingRecord->dial_duration;
+            }
+        }
+    } else {
+        // If updating without call data, preserve existing durations
+        $existingRecord = CallLog::where('call_id', $callId)->first();
 
-//             // Retrieve existing record to preserve any existing durations
-//             $existingRecord = AutoDailerReport::where('call_id', $callId)->first();
+        if ($existingRecord) {
+            $talking_duration = $existingRecord->talking_duration ?? null;
+            $dial_duration = $existingRecord->dial_duration ?? null;
+        }
+    }
 
-//             if ($existingRecord) {
-//                 // Update durations based on current status
-//                 switch ($status) {
-//                     case 'Talking':
-//                         $duration_time = $currentDuration;
-//                         $duration_routing = $existingRecord->duration_routing;
-//                         break;
-//                     case 'Routing':
-//                         $duration_routing = $currentDuration;
-//                         $duration_time = $existingRecord->duration_time;
-//                         break;
-//                     default:
-//                         $duration_time = $existingRecord->duration_time;
-//                         $duration_routing = $existingRecord->duration_routing;
-//                 }
-//             }
-//         } else {
-//             // If updating without call data, preserve existing durations
-//             $existingRecord = AutoDailerReport::where('call_id', $callId)->first();
+    return DB::transaction(function () use ($callId, $status, $talking_duration, $dial_duration, $currentDuration) {
+        $report = CallLog::where('call_id', $callId)->update([
+            'call_status' => $status,
+            'talking_duration' => $talking_duration,
+            'dial_duration' => $dial_duration,
+        ]);
 
-//             if ($existingRecord) {
-//                 $duration_time = $existingRecord->duration_time ?? null;
-//                 $duration_routing = $existingRecord->duration_routing ?? null;
-//             }
-//         }
+        Contact::where('call_id', $callId)->update(['status' => $status]);
 
-//         return DB::transaction(function () use ($callId, $status, $duration_time, $duration_routing, $call, $currentDuration) {
-//             $report = AutoDailerReport::where('call_id', $callId)->update([
-//                 'status' => $status,
-//                 'duration_time' => $duration_time,
-//                 'duration_routing' => $duration_routing,
-//             ]);
+        Log::info("ADialParticipantsCommand ☎️✅ Call status updated for call_id: {$callId}, " .
+            "Status: {$status}, " .
+            "Duration: " . ($currentDuration ?? 'N/A'));
 
-//             ADialData::where('call_id', $callId)->update(['state' => $status]);
-
-//             Log::info("ADialParticipantsCommand ☎️✅ Call status updated for call_id: {$callId}, " .
-//                 'Status: ' . ($call['Status'] ?? 'N/A') .
-//                 ', Duration: ' . ($currentDuration ?? 'N/A'));
-
-//             return $report;
-//         });
-//     }
+        return $report;
+    });
+}
 
 
 
@@ -395,7 +410,7 @@ class ThreeCXIntegrationService
 //                 $existingRecord = AutoDistributerReport::where('call_id', $callId)->first();
 
 //                 $duration_time = $existingRecord->duration_time ?? null;
-//                 $duration_routing = $existingRecord->duration_routing ?? null;
+//                 $dial_duration = $existingRecord->duration_routing ?? null;
 //                 $currentDuration = null;
 
 //                 // Calculate durations if call data is provided

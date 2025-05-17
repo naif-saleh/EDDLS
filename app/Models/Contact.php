@@ -100,7 +100,7 @@ class Contact extends Model
     public function markAsCalling()
     {
         return $this->update([
-            'status' => 'calling',
+            'status' => 'called',
             'start_calling' => now(),
             'attempt_count' => $this->attempt_count + 1,
         ]);
@@ -115,7 +115,7 @@ class Contact extends Model
     public function completeCall($status)
     {
         if (!in_array($status, ['answer', 'no_answer'])) {
-            $status = 'no_answer';
+            $status = 'called';
         }
 
         return $this->update([

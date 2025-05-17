@@ -19,8 +19,8 @@ return new class extends Migration
             $table->foreignId('agent_id')->nullable()->constrained()->onDelete('set null');
             $table->string('call_id')->default('null'); // Unique identifier for the call
             $table->string('call_type');
-            $table->integer('talking_duration')->default(0); // in seconds
-            $table->integer('dial_duration')->default(0); // in seconds
+            $table->string('talking_duration')->default('not_called_yet'); 
+            $table->string('dial_duration')->default('not_called_yet'); 
             $table->string('call_status');
             $table->string('recording_url')->nullable();
             $table->text('notes')->nullable();

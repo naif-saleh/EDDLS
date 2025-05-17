@@ -130,11 +130,13 @@ class DialerMakeCallCommand extends Command
 
         if (empty($tenant->setting->start_time) || empty($tenant->setting->end_time)) {
             Log::info("Tenant {$tenant->name} has no start or end time set for dialer calls");
+
             return ['processed' => 0, 'calls' => 0];
         }
 
-        if(! now()->between($tenant->setting->start_time , $tenant->setting->end_time)) {
+        if (! now()->between($tenant->setting->start_time, $tenant->setting->end_time)) {
             Log::info("Tenant {$tenant->name} is out of time for dialer calls");
+
             return ['processed' => 0, 'calls' => 0];
         }
         // Load active campaigns for this tenant
@@ -189,19 +191,6 @@ class DialerMakeCallCommand extends Command
             // Initialize the 3CX service for this tenant
             $threeCxService = new ThreeCXIntegrationService($tenant->id);
 
-            // Check if the provider has any active calls
-            $activeCallsResponse = $threeCxService->getActiveCallsForProvider($provider->extension);
-            $callId = null;
-            $callStatus = null;
-
-            if (isset($activeCallsResponse['value']) && ! empty($activeCallsResponse['value'])) {
-                // Extract the first active call information
-                $activeCall = $activeCallsResponse['value'][0];
-                $callId = $activeCall['Id'] ?? null;
-                $callStatus = $activeCall['Status'] ?? null;
-                Log::info("Active call found - Call ID: {$callId}, Status: {$callStatus}");
-            }
-
             // Get contacts to process for this campaign
             $contacts = Contact::where('campaign_id', $campaign->id)
                 ->where('status', 'new')
@@ -230,42 +219,84 @@ class DialerMakeCallCommand extends Command
                 }
 
                 try {
-                    // Mark as calling
-                    $contact->markAsCalling();
+
                     $campaignProcessed++;
 
                     $licenseSevice = new LicenseService;
-                     if ($licenseSevice->validDialCallsCount($tenant->id)) {
-                                  // Make the actual call
-                    $threeCxService->makeCall($provider->extension, $contact->phone_number);
-                            } else {
-                                Log::error("Tenant {$tenant->name}: License validation failed. Make Calls.");
-                            }
-
-
-                    // Check if we need to refresh the active calls to get the latest call ID
-                    if (! $callId) {
-                        $refreshCallsResponse = $threeCxService->getActiveCallsForProvider($provider->extension);
-                        if (isset($refreshCallsResponse['value']) && ! empty($refreshCallsResponse['value'])) {
-                            $activeCall = $refreshCallsResponse['value'][0];
-                            $callId = $activeCall['Id'] ?? null;
-                            $callStatus = $activeCall['Status'] ?? null;
-                            Log::info("Updated active call - Call ID: {$callId}, Status: {$callStatus}");
-                        }
+                    if ($licenseSevice->validDialCallsCount($tenant->id)) {
+                        // Make the actual call
+                        $threeCxService->makeCall($provider->extension, $contact->phone_number);
+                        // Mark as calling
+                        $contact->markAsCalling();
+                    } else {
+                        Log::error("Tenant {$tenant->name}: License validation failed. Make Calls.");
+                        throw new \Exception('License validation failed');
                     }
 
-                    // Log call details
-                    $callLog = CallLog::create([
-                        'call_id' => $callId ?? 0,
-                        'campaign_id' => $campaign->id,
-                        'provider_id' => $provider->id,
-                        'contact_id' => $contact->id,
-                        'call_status' => $callStatus ?? 'initiated',
-                        'call_type' => 'dialer',
-                        'called_at' => now(),
-                    ]);
+                    // Wait a moment for the call to be registered in the system
+                    usleep(500000); // 500ms delay
 
-                    Log::info("CallLog created/updated with Call ID: {$callId}, Status: {$callStatus}");
+                    // Get active calls after initiating the call
+                    $refreshCallsResponse = $threeCxService->getActiveCallsForProvider($provider->extension);
+
+                    // Initialize variables
+                    $callId = null;
+                    $callStatus = null;
+
+                    // Process active call data if available
+                    if (isset($refreshCallsResponse['value']) && ! empty($refreshCallsResponse['value'])) {
+                        // Find the most recent call (usually the first one in the array)
+                        $activeCall = $refreshCallsResponse['value'][0];
+                        $callId = $activeCall['Id'] ?? null;
+                        $callStatus = $activeCall['Status'] ?? null;
+
+                        // Log complete active call information for debugging
+                        Log::info('Active call details:', [
+                            'call_id' => $callId,
+                            'status' => $callStatus,
+                            'caller' => $activeCall['Caller'] ?? 'Unknown',
+                            'callee' => $activeCall['Callee'] ?? 'Unknown',
+                            'established_at' => $activeCall['EstablishedAt'] ?? null,
+                            'last_status_change' => $activeCall['LastChangeStatus'] ?? null,
+                        ]);
+                    } else {
+                        Log::warning("No active calls found for provider {$provider->extension} after initiating call");
+                    }
+
+                    // Upsert call log entry - create if not exists, update if exists
+                    if ($callId) {
+                        $callLog = CallLog::updateOrCreate(
+                            ['call_id' => $callId], // Find by call_id
+                            [
+                                'campaign_id' => $campaign->id,
+                                'provider_id' => $provider->id,
+                                'contact_id' => $contact->id,
+                                'call_status' => $callStatus ?? 'Unknown',
+                                'call_type' => 'dialer',
+                                'dial_duration' => 0, // Will be calculated later
+                                'talking_duration' => 0, // Will be calculated later
+                                'called_at' => $callLog->called_at ?? now(), // Preserve original called_at if updating
+                                'updated_at' => now(),
+                            ]
+                        );
+
+                        Log::info("CallLog upserted with ID: {$callLog->id}, Call ID: {$callId}, Status: {$callStatus}");
+                    } else {
+                        // If no call_id is available yet, create a placeholder record
+                        $callLog = CallLog::create([
+                            'call_id' => 0, // Placeholder
+                            'campaign_id' => $campaign->id,
+                            'provider_id' => $provider->id,
+                            'contact_id' => $contact->id,
+                            'call_status' => 'Initiated', // Initial status
+                            'call_type' => 'dialer',
+                            'dial_duration' => 0,
+                            'talking_duration' => 0,
+                            'called_at' => now(),
+                        ]);
+
+                        Log::info("Placeholder CallLog created with ID: {$callLog->id}, Status: Initiated");
+                    }
 
                     $campaignCalls++;
 
