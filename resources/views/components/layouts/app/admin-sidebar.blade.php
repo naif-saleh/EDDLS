@@ -27,12 +27,12 @@
                 <flux:navlist.item icon="clipboard-document-list" :href="route('admin.license.list')"
                     :current="request()->routeIs('admin.license.list')" wire:navigate>{{ __('License Management') }}
                 </flux:navlist.item>
-                {{-- System Log Information --}}
-                {{-- <flux:navlist.item icon="presentation-chart-line"
-                    :href="route('tenant.system.log', ['tenant' => auth()->user()->tenant->slug])"
-                    :current="request()->routeIs('tenant.system.log', ['tenant' => auth()->user()->tenant->slug])"
-                    wire:navigate>{{ __('System Log Info ') }}
-                </flux:navlist.item> --}}
+                {{-- System Log --}}
+                    <flux:navlist.item icon="document-magnifying-glass"
+                        :href="route('admin.system.log')"
+                        :current="request()->routeIs('admin.system.log')"
+                        wire:navigate>{{ __('System Log ') }}
+                    </flux:navlist.item>
             </flux:navlist.group>
         </flux:navlist>
 

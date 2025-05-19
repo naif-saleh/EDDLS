@@ -94,6 +94,20 @@ class SystemLogService
         ?array $metadata = null
     ): SystemLog {
         $request = request();
+        $user = Auth::user();
+
+        // Determine tenant_id from either:
+        // 1. The model's tenant_id if it exists
+        // 2. The authenticated user's tenant_id
+        // 3. The current tenant from the application container
+        $tenantId = null;
+        if ($model && method_exists($model, 'tenant') && $model->tenant) {
+            $tenantId = $model->tenant->id;
+        } elseif ($user && $user->tenant_id) {
+            $tenantId = $user->tenant_id;
+        } elseif (app()->has('current_tenant_id')) {
+            $tenantId = app()->get('current_tenant_id');
+        }
 
         $data = [
             'log_type' => $logType,
@@ -102,7 +116,8 @@ class SystemLogService
             'previous_data' => $previousData,
             'new_data' => $newData,
             'metadata' => $metadata,
-            'user_id' => Auth::id(),
+            'user_id' => $user?->id,
+            'tenant_id' => $tenantId,
             'ip_address' => $request->ip(),
             'user_agent' => $request->userAgent()
         ];

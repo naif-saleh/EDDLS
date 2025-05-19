@@ -552,24 +552,61 @@ class ProcessCsvContactsBatchFile implements ShouldQueue
     }
 
     /**
-     * Save a skipped phone number to the database
+     * Save a skipped phone number to the database with improved validation and error handling
      */
     protected function saveSkippedNumber(string $phoneNumber, ?int $providerId, ?int $campaignId, string $skipReason, ?string $fileName, int $rowNumber, ?array $rawData = null)
     {
         try {
+            // Clean phone number
+            $cleanPhoneNumber = preg_replace('/[^0-9+\-() ]/', '', $phoneNumber);
+            
+            // Validate provider exists if ID is provided
+            if ($providerId) {
+                $providerExists = Provider::where('id', $providerId)
+                    ->where('tenant_id', $this->tenantId)
+                    ->exists();
+                
+                if (!$providerExists) {
+                    Log::warning("Invalid provider_id {$providerId} for tenant {$this->tenantId}, setting to null");
+                    $providerId = null;
+                }
+            }
+
+            // Validate campaign exists if ID is provided
+            if ($campaignId) {
+                $campaignExists = Campaign::where('id', $campaignId)
+                    ->where('tenant_id', $this->tenantId)
+                    ->exists();
+                
+                if (!$campaignExists) {
+                    Log::warning("Invalid campaign_id {$campaignId} for tenant {$this->tenantId}, setting to null");
+                    $campaignId = null;
+                }
+            }
+
+            // Create skipped number record with validation
             SkippedNumber::create([
-                'phone_number' => $phoneNumber,
+                'phone_number' => $cleanPhoneNumber,
                 'provider_id' => $providerId,
                 'campaign_id' => $campaignId,
                 'tenant_id' => $this->tenantId,
                 'batch_id' => $this->batchId,
-                'file_name' => $fileName,
-                'skip_reason' => $skipReason,
+                'file_name' => $fileName ? substr($fileName, 0, 255) : null, // Ensure filename isn't too long
+                'skip_reason' => substr($skipReason, 0, 500), // Limit reason length
                 'row_number' => $rowNumber,
-                'raw_data' => $rawData,
+                'raw_data' => $rawData ? json_encode($rawData) : null, // Ensure raw data is JSON
             ]);
+
+            Log::info("Successfully saved skipped number record for phone: {$cleanPhoneNumber}, tenant: {$this->tenantId}, reason: {$skipReason}");
         } catch (\Exception $e) {
-            Log::error("Tenant {$this->tenantId}: Error saving skipped number: ".$e->getMessage());
+            Log::error("Error saving skipped number for tenant {$this->tenantId}: " . $e->getMessage(), [
+                'phone_number' => $phoneNumber,
+                'provider_id' => $providerId,
+                'campaign_id' => $campaignId,
+                'file_name' => $fileName,
+                'row_number' => $rowNumber,
+                'exception' => $e
+            ]);
         }
     }
 

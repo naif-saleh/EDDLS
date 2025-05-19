@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Storage;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\WithFileUploads;
 use Masmerise\Toaster\Toaster;
+use App\Services\SystemLogService;
 
 class TenantSettings extends Component
 {
@@ -20,6 +21,13 @@ class TenantSettings extends Component
     public $tenantLogo;
     public $autoCall = false;
     public $setting;
+
+    protected $systemLog;
+
+    public function boot(SystemLogService $systemLog)
+    {
+        $this->systemLog = $systemLog;
+    }
 
     protected $rules = [
         'timeStart' => 'required',
@@ -36,8 +44,33 @@ class TenantSettings extends Component
         'numberOfCalls.required' => 'Number of calls is required.',
         'numberOfCalls.integer' => 'Number of calls must be a whole number.',
         'numberOfCalls.min' => 'Number of calls must be at least 1.',
-         'tenantLogo.max' => 'Logo size must not exceed 1MB.',
+        'tenantLogo.max' => 'Logo size must not exceed 1MB.',
     ];
+
+    protected function getChangesDescription($oldData, $newData)
+    {
+        $changes = [];
+        
+        if ($oldData['start_time'] !== $newData['start_time']) {
+            $changes[] = "Operating hours start: {$oldData['start_time']} → {$newData['start_time']}";
+        }
+        
+        if ($oldData['end_time'] !== $newData['end_time']) {
+            $changes[] = "Operating hours end: {$oldData['end_time']} → {$newData['end_time']}";
+        }
+        
+        if ($oldData['calls_at_time'] !== $newData['calls_at_time']) {
+            $changes[] = "Concurrent calls: {$oldData['calls_at_time']} → {$newData['calls_at_time']}";
+        }
+        
+        if ($oldData['auto_call'] !== $newData['auto_call']) {
+            $oldValue = $oldData['auto_call'] ? 'Enabled' : 'Disabled';
+            $newValue = $newData['auto_call'] ? 'Enabled' : 'Disabled';
+            $changes[] = "Auto call: {$oldValue} → {$newValue}";
+        }
+
+        return !empty($changes) ? implode("\n", $changes) : 'No changes detected';
+    }
 
     public function mount()
     {
@@ -60,14 +93,9 @@ class TenantSettings extends Component
         $this->validate();
 
         $tenant = Auth::user()->tenant;
-
-        // Process logo if uploaded
-        $logoPath = null;
-        if ($this->tenantLogo) {
-            $logoPath = $this->tenantLogo->store('tenant-logos', 'public');
-        }
-
-        // Update or create settings
+        $isUpdate = $this->setting !== null;
+        
+        // Prepare settings data
         $settings = [
             'tenant_id' => $tenant->id,
             'start_time' => $this->timeStart,
@@ -76,27 +104,72 @@ class TenantSettings extends Component
             'auto_call' => $this->autoCall,
         ];
 
-        // Only update logo if a new one was uploaded
-        if ($logoPath) {
+        // Process logo if uploaded
+        $logoPath = null;
+        if ($this->tenantLogo) {
+            $logoPath = $this->tenantLogo->store('tenant-logos', 'public');
             $settings['logo'] = $logoPath;
 
             // Delete old logo if exists
             if ($this->setting && $this->setting->logo) {
-                Storage::disk('public')->delete($this->setting->logo);
+                $oldLogoPath = $this->setting->logo;
+                Storage::disk('public')->delete($oldLogoPath);
+                
+                // Log logo change with clear before/after values
+                $this->systemLog->log(
+                    logType: 'info',
+                    action: 'logo_update',
+                    model: $this->setting,
+                    description: "Logo updated: {$oldLogoPath} → {$logoPath}",
+                    previousData: ['logo' => $oldLogoPath],
+                    newData: ['logo' => $logoPath]
+                );
             }
         }
 
-        if ($this->setting) {
+        if ($isUpdate) {
+            $previousData = [
+                'start_time' => $this->setting->start_time ? $this->setting->start_time->format('H:i') : 'Not set',
+                'end_time' => $this->setting->end_time ? $this->setting->end_time->format('H:i') : 'Not set',
+                'calls_at_time' => $this->setting->calls_at_time,
+                'auto_call' => $this->setting->auto_call,
+            ];
+
             $this->setting->update($settings);
+            
+            // Log settings update with detailed changes
+            $this->systemLog->log(
+                logType: 'info',
+                action: 'update',
+                model: $this->setting,
+                description: $this->getChangesDescription($previousData, $settings),
+                previousData: $previousData,
+                newData: $settings
+            );
+
             Toaster::success('Tenant settings updated successfully!');
         } else {
-            Setting::create($settings);
+            $setting = Setting::create($settings);
+            
+            // Log settings creation with initial values
+            $this->systemLog->log(
+                logType: 'success',
+                action: 'create',
+                model: $setting,
+                description: "Initial settings created:\n" .
+                    "Operating hours: {$this->timeStart} - {$this->timeEnd}\n" .
+                    "Concurrent calls: {$this->numberOfCalls}\n" .
+                    "Auto call: " . ($this->autoCall ? 'Enabled' : 'Disabled'),
+                newData: $settings
+            );
+
             Toaster::success('Tenant settings created successfully!');
         }
 
         // Refresh data
         $this->setting = Setting::where('tenant_id', $tenant->id)->first();
     }
+
     public function render()
     {
         return view('livewire.settings.tenant-settings');

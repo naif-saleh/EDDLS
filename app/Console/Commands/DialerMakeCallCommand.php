@@ -301,7 +301,6 @@ class DialerMakeCallCommand extends Command
                     $campaignCalls++;
 
                     // Update campaign status after each call
-                    $campaignStatusService->updateSingleCampaignStatus($campaign);
 
                     Log::info("Call initiated: {$contact->phone_number} for tenant {$tenant->id}, campaign {$campaign->id}");
 
@@ -323,7 +322,6 @@ class DialerMakeCallCommand extends Command
                     ]);
 
                     // Update campaign status after failed call
-                    $campaignStatusService->updateSingleCampaignStatus($campaign);
                 }
             }
 

@@ -47,13 +47,7 @@ class Login extends Component
 
         // 🔐 Allow SuperAdmin immediately
         if (! $user->isSuperAdmin()) {
-            // 🔐 If NOT super admin, check tenant admin approval
-            // if (!$user->isTenantAdmin() || $user->role != 'agent')  {
-            //     Auth::logout();
-            //     session()->flash('success', 'You are not approved . Please call us.');
-            //     $this->redirect(route('login'), navigate: true);
-            //     return;
-            // }
+            
 
             if($user->tenant->status != 'active'){
                 Auth::logout();
@@ -81,6 +75,10 @@ class Login extends Component
         }
 
         if ($user->isTenantAdmin()) {
+            return ['tenant.dashboard', ['tenant' => $user->tenant->slug]];
+        }
+
+        if ($user->role == 'agent') {
             return ['tenant.dashboard', ['tenant' => $user->tenant->slug]];
         }
 

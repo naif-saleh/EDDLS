@@ -21,6 +21,7 @@ class SystemLog extends Model
         'model_type',
         'model_id',
         'user_id',
+        'tenant_id',
         'action',
         'description',
         'previous_data',
@@ -64,6 +65,16 @@ class SystemLog extends Model
     }
 
     /**
+     * Get the tenant this log belongs to.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function tenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class);
+    }
+
+    /**
      * Scope a query to only include logs of a certain type.
      *
      * @param  \Illuminate\Database\Eloquent\Builder  $query
@@ -98,6 +109,18 @@ class SystemLog extends Model
     public function scopeByUser($query, $userId)
     {
         return $query->where('user_id', $userId);
+    }
+
+    /**
+     * Scope a query to only include logs for a specific tenant.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     * @param  int  $tenantId
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeForTenant($query, $tenantId)
+    {
+        return $query->where('tenant_id', $tenantId);
     }
 
     /**

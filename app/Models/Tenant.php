@@ -3,13 +3,15 @@
 
 namespace App\Models;
 
+use App\Traits\LogsActivity;
+use App\Traits\TracksStatusChanges;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
 class Tenant extends Model
 {
-    use HasFactory;
+    use HasFactory, LogsActivity, TracksStatusChanges;
 
     protected $fillable = [
         'slug',

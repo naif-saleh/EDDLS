@@ -7,6 +7,7 @@ use App\Models\Agent;
 use App\Models\Campaign;
 use App\Models\Provider;
 use App\Models\Tenant;
+use App\Services\SystemLogService;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Maatwebsite\Excel\Facades\Excel;
@@ -41,6 +42,11 @@ class DialerCampaignsList extends Component
 
     public $campaignIdToDelete = '';
 
+    protected function getSystemLogService(): SystemLogService
+    {
+        return app(SystemLogService::class);
+    }
+
     public function mount(Tenant $tenant, Provider $provider, Agent $agent, Excel $excel)
     {
         abort_unless($provider->tenant_id === $tenant->id, 403, 'Provider does not belong to tenant.');
@@ -48,19 +54,38 @@ class DialerCampaignsList extends Component
         $this->provider = $provider;
         $this->tenant = $tenant;
         $this->agent = $agent;
-
     }
 
     public function updatedSelectAll($value)
     {
         if ($value) {
             $this->selectedCampaigns = $this->provider->campaigns()->pluck('id')->map(fn ($id) => (string) $id)->toArray();
+            
+            // Log select all action
+            $this->getSystemLogService()->log(
+                logType: 'ui_action',
+                action: 'select_all_campaigns',
+                description: 'Selected all campaigns',
+                metadata: [
+                    'provider_id' => $this->provider->id,
+                    'campaign_count' => count($this->selectedCampaigns)
+                ]
+            );
         } else {
             $this->selectedCampaigns = [];
+            
+            // Log deselect all action
+            $this->getSystemLogService()->log(
+                logType: 'ui_action',
+                action: 'deselect_all_campaigns',
+                description: 'Deselected all campaigns',
+                metadata: [
+                    'provider_id' => $this->provider->id
+                ]
+            );
         }
     }
 
-    // make Sorting
     public function sortBy($field)
     {
         if ($this->sortField === $field) {
@@ -69,33 +94,86 @@ class DialerCampaignsList extends Component
             $this->sortField = $field;
             $this->sortDirection = 'asc';
         }
+
+        // Log sort action
+        $this->getSystemLogService()->log(
+            logType: 'ui_action',
+            action: 'sort_campaigns',
+            description: "Sorted campaigns by {$field}",
+            metadata: [
+                'sort_field' => $field,
+                'sort_direction' => $this->sortDirection
+            ]
+        );
     }
 
-    // Activate Campaign
     public function toggleCampaignActivation($id)
     {
         $campaign = $this->provider->campaigns()->where('id', $id)->first();
+        $previousStatus = $campaign->allow;
 
         $campaign->update([
-            'allow' => ! $campaign->allow,
+            'allow' => !$campaign->allow,
         ]);
+
+        // Log campaign activation/deactivation
+        $this->getSystemLogService()->log(
+            logType: 'status_change',
+            action: 'campaign_activation_toggle',
+            model: $campaign,
+            description: $campaign->allow ? 'Campaign activated' : 'Campaign deactivated',
+            previousData: ['allow' => $previousStatus],
+            newData: ['allow' => $campaign->allow],
+            metadata: [
+                'provider_id' => $this->provider->id
+            ]
+        );
+
         if ($campaign->allow == 1) {
             Toaster::success('Campaign Activated Successfully');
         } else {
             Toaster::success('Campaign Disactivated Successfully');
         }
-
     }
 
     public function confirmDelete($id = null)
     {
         $this->campaignIdToDelete = $id;
         $this->confirmingDelete = true;
+
+        // Log delete confirmation
+        if ($id) {
+            $campaign = Campaign::find($id);
+            if ($campaign) {
+                $this->getSystemLogService()->log(
+                    logType: 'ui_action',
+                    action: 'confirm_delete_campaign',
+                    model: $campaign,
+                    description: "Initiated delete confirmation for campaign",
+                    metadata: [
+                        'provider_id' => $this->provider->id
+                    ]
+                );
+            }
+        }
     }
 
     public function deleteSelectedCampaigns()
     {
         if (count($this->selectedCampaigns) > 0) {
+            // Log before deletion
+            $campaigns = Campaign::whereIn('id', $this->selectedCampaigns)->get();
+            foreach ($campaigns as $campaign) {
+                $this->getSystemLogService()->logDelete(
+                    model: $campaign,
+                    description: "Deleted campaign in bulk operation",
+                    metadata: [
+                        'provider_id' => $this->provider->id,
+                        'bulk_delete' => true
+                    ]
+                );
+            }
+
             Campaign::whereIn('id', $this->selectedCampaigns)->delete();
             $this->selectedCampaigns = [];
             $this->selectAll = false;
@@ -107,20 +185,42 @@ class DialerCampaignsList extends Component
     public function deleteCampaign()
     {
         if ($this->campaignIdToDelete) {
-            Campaign::find($this->campaignIdToDelete)->delete();
+            $campaign = Campaign::find($this->campaignIdToDelete);
+            if ($campaign) {
+                // Log single campaign deletion
+                $this->getSystemLogService()->logDelete(
+                    model: $campaign,
+                    description: "Deleted single campaign",
+                    metadata: [
+                        'provider_id' => $this->provider->id
+                    ]
+                );
+
+                $campaign->delete();
+            }
             $this->confirmingDelete = false;
             $this->campaignIdToDelete = null;
             Toaster::success('Campaign Deleted Successfully.');
-         } else {
+        } else {
             $this->deleteSelectedCampaigns();
-
         }
     }
 
-    public function downloadContacts( $campaign)
+    public function downloadContacts($campaign)
     {
         $campaign = Campaign::findOrFail($campaign);
 
+        // Log export action
+        $this->getSystemLogService()->log(
+            logType: 'export',
+            action: 'export_campaign_contacts',
+            model: $campaign,
+            description: "Exported campaign contacts",
+            metadata: [
+                'provider_id' => $this->provider->id,
+                'export_format' => 'xlsx'
+            ]
+        );
 
         Toaster::success('Campaign Exporting Now...');
         $filename = 'campaign_contacts.xlsx';
@@ -154,6 +254,5 @@ class DialerCampaignsList extends Component
         return view('livewire.systems.campaign.dialer-campaigns-list', [
             'campaigns' => $campaigns,
         ]);
-
     }
 }

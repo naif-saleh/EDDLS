@@ -10,6 +10,7 @@ use App\Models\Campaign;
 use App\Models\Contact;
 use App\Models\Provider;
 use App\Models\Tenant;
+use App\Services\SystemLogService;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
@@ -39,17 +40,20 @@ class DistributorCampaignsForm extends Component
     public $tenant = '';
     public $agent = '';
 
+    protected function getSystemLogService(): SystemLogService
+    {
+        return app(SystemLogService::class);
+    }
 
     public function mount(Provider $provider, Tenant $tenant, Agent $agent)
     {
         $this->provider = $provider;
         $this->tenant = $tenant;
         $this->agent = $agent;
+    }
 
-      }
-
-     // Validation rules
-     protected $rules = [
+    // Validation rules
+    protected $rules = [
         'campaignName' => 'required|string|min:3|max:255',
         'campaignStart' => 'required',
         'campaignEnd' => 'required',
@@ -72,8 +76,6 @@ class DistributorCampaignsForm extends Component
         $this->validate();
 
         try {
-            // Read the CSV file to get total contacts before processing
-            // This helps us set up progress tracking immediately
             if (!$this->csvFile) {
                 throw new \Exception('No CSV file uploaded');
             }
@@ -100,9 +102,34 @@ class DistributorCampaignsForm extends Component
                 'contact_count' => $totalRecords,
             ]);
 
+            // Log campaign creation
+            $this->getSystemLogService()->logCreate(
+                model: $campaign,
+                description: "Created new distributor campaign: {$this->campaignName}",
+                metadata: [
+                    'total_contacts' => $totalRecords,
+                    'campaign_type' => $this->campaignType,
+                    'provider_id' => $this->provider->id,
+                    'agent_id' => $this->agent->id,
+                    'csv_file' => $path,
+                ]
+            );
+
             // Dispatch a single job to process the CSV file
-            // This eliminates serialization issues by not using batching at this stage
             ProcessCsvContactsBatch::dispatch($path, $campaign->id);
+
+            // Log CSV processing started
+            $this->getSystemLogService()->log(
+                logType: 'process',
+                action: 'csv_processing_started',
+                model: $campaign,
+                description: "Started processing CSV file for distributor campaign: {$this->campaignName}",
+                metadata: [
+                    'file_path' => $path,
+                    'total_records' => $totalRecords,
+                    'agent_id' => $this->agent->id
+                ]
+            );
 
             // Set initial processing state
             $this->isProcessing = true;
@@ -118,6 +145,20 @@ class DistributorCampaignsForm extends Component
             session()->flash('message', 'Campaign created successfully! Processing contacts in the background.');
             $this->reset(['campaignName', 'campaignStart', 'campaignEnd', 'csvFile']);
         } catch (\Exception $e) {
+            // Log error
+            $this->getSystemLogService()->log(
+                logType: 'error',
+                action: 'distributor_campaign_creation_failed',
+                description: "Failed to create distributor campaign: {$e->getMessage()}",
+                metadata: [
+                    'campaign_name' => $this->campaignName,
+                    'provider_id' => $this->provider->id,
+                    'agent_id' => $this->agent->id,
+                    'error' => $e->getMessage(),
+                    'stack_trace' => $e->getTraceAsString(),
+                ]
+            );
+
             session()->flash('error', 'Error creating campaign: ' . $e->getMessage());
         }
     }
@@ -169,9 +210,35 @@ class DistributorCampaignsForm extends Component
                 if ($campaign->status !== 'processed') {
                     $campaign->status = 'processed';
                     $campaign->save();
+
+                    // Log completion
+                    $this->getSystemLogService()->log(
+                        logType: 'process',
+                        action: 'csv_processing_completed',
+                        model: $campaign,
+                        description: "Completed processing CSV file for distributor campaign: {$campaign->name}",
+                        metadata: [
+                            'total_processed' => $processedCount,
+                            'expected_count' => $expectedCount,
+                            'agent_id' => $this->agent->id
+                        ]
+                    );
                 }
             }
         } catch (\Exception $e) {
+            // Log error
+            $this->getSystemLogService()->log(
+                logType: 'error',
+                action: 'progress_check_failed',
+                description: "Failed to check progress: {$e->getMessage()}",
+                metadata: [
+                    'campaign_id' => $this->currentCampaignId,
+                    'agent_id' => $this->agent->id,
+                    'error' => $e->getMessage(),
+                    'stack_trace' => $e->getTraceAsString(),
+                ]
+            );
+
             Log::error('Error checking progress: ' . $e->getMessage());
         }
     }

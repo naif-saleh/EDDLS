@@ -49,7 +49,7 @@ class AgentStats extends Component
     protected function getDistCampaignStats($campaign_type)
     {
         $tenantId = $this->getTenantId();
-        $baseQuery = Campaign::where('tenant_id', $tenantId);
+        $baseQuery = Campaign::where('tenant_id', $tenantId)->where('campaign_type', $campaign_type);
 
         // For total campaigns
         $total = $baseQuery->count();
@@ -62,7 +62,7 @@ class AgentStats extends Component
 
         $completed = $dialerQuery->clone()
             ->whereDoesntHave('contacts', function($query) {
-                $query->whereIn('status', ['new', 'Rounting', 'Talking']);
+                $query->whereIn('status', ['new']);
             })
             ->whereHas('contacts')
             ->count();

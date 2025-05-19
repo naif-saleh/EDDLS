@@ -175,16 +175,7 @@ class DistributorMakeCallCommand extends Command
             }])
             ->get();
 
-        // Log agent details for clarity
-
-        // foreach ($agents as $agent) {
-        //     $campaignCount = $agent->campaigns->count();
-        //     Log::info("******Eligible agent found: {$agent->name} (ID: {$agent->id}, Extension: {$agent->extension}), Campaigns: {$campaignCount}");
-        //     foreach ($agent->campaigns as $campaign) {
-        //         $newContacts = $campaign->contacts()->where('status', 'new')->count();
-        //         Log::info("  - Campaign: {$campaign->name} (ID: {$campaign->id}), New Contacts: {$newContacts}");
-        //     }
-        // }
+        
 
         if ($agents->isEmpty()) {
             Log::info("No active agents with eligible campaigns found for tenant {$tenant->name}");
@@ -325,62 +316,60 @@ class DistributorMakeCallCommand extends Command
                     // Make the actual call through the agent
                     Log::info("Initiating call to {$contact->phone_number} via agent {$agent->name} (Extension: {$agent->extension})");
                     $callResponse = $threeCxService->makeCallDist($agent, $contact->phone_number);
-// Mark contact as calling only after successful call initiation
-                                     $contact->markAsCalling();
+                    // Mark contact as calling only after successful call initiation
+                    $contact->markAsCalling();
+                    // Mark contact as calling only after successful call initiation
                     // Log the raw response for debugging
                     Log::debug('Raw call response:', ['response' => $callResponse]);
 
                     // Add a short delay to ensure the call is registered in the system
                     usleep(500000); // 500ms delay
 
-                    $callId = null;
-                    $callStatus = null;
+                     // Get active calls after initiating the call
+                     $refreshCallsResponse = $threeCxService->getActiveCallsForProvider($agent->extension);
 
-                    if (is_array($callResponse) && isset($callResponse['result'])) {
-                        if (is_array($callResponse['result']) && ! empty($callResponse['result'])) {
-                            // Check if result is an indexed array
-                            if (isset($callResponse['result'][0])) {
-                                $activeCall = $callResponse['result'][0];
-                                $callId = $activeCall['Id'] ?? null;
-                                $callStatus = $activeCall['Status'] ?? null;
+                     // Initialize variables
+                     $callId = null;
+                     $callStatus = null;
+                     // Process active call data if available
+                     if (isset($refreshCallsResponse['value']) && ! empty($refreshCallsResponse['value'])) {
+                        // Find the most recent call (usually the first one in the array)
+                        $activeCall = $refreshCallsResponse['value'][0];
+                        $callId = $activeCall['Id'] ?? null;
+                        $callStatus = $activeCall['Status'] ?? null;
 
-                                if ($callId) {
-                                    Log::info("Updated active call - Call ID: {$callId}, Status: {$callStatus}");
-
-                                    
-
-                                    // Log call details
-                                    $callLog = CallLog::create([
-                                        'call_id' => $callId,
-                                        'campaign_id' => $campaign->id,
-                                        'provider_id' => $provider->id,
-                                        'agent_id' => $agent->id,
-                                        'contact_id' => $contact->id,
-                                        'call_status' => $callStatus ?? 'initiated',
-                                        'call_type' => 'distributor',
-                                        'called_at' => now(),
-                                    ]);
-
-                                    Log::info("CallLog created with Call ID: {$callId}, Status: {$callStatus}");
-                                    $campaignCalls++;
-
-                                    Log::info("Call initiated: {$contact->phone_number} for tenant {$tenant->id}, agent {$agent->id}, campaign {$campaign->id}");
-
-                                    // Add delay between calls for rate limiting
-                                    usleep($this->callDelay);
-                                } else {
-                                    // Call initiation failed or could not get call ID
-                                    Log::error("Failed to initiate call or get call ID for {$contact->phone_number} for tenant {$tenant->id}");
-                                    Log::error('API may not have returned expected response format');
-                                }
-                            }
-                            // Check if Value is an associative array (direct object)
-                            elseif (isset($callResponse['Value']['Id'])) {
-                                $callId = $callResponse['Value']['Id'];
-                                $callStatus = $callResponse['Value']['Status'] ?? 'unknown';
-                            }
-                        }
+                        // Log complete active call information for debugging
+                        Log::info('Active call details:', [
+                            'call_id' => $callId,
+                            'status' => $callStatus,
+                            'caller' => $activeCall['Caller'] ?? 'Unknown',
+                            'callee' => $activeCall['Callee'] ?? 'Unknown',
+                            'established_at' => $activeCall['EstablishedAt'] ?? null,
+                            'last_status_change' => $activeCall['LastChangeStatus'] ?? null,
+                        ]);
+                    } else {
+                        Log::warning("No active calls found for provider {$provider->extension} after initiating call");
                     }
+
+                    // Upsert call log entry - create if not exists, update if exists
+                    if ($callId) {
+                        $callLog = CallLog::updateOrCreate(
+                            ['call_id' => $callId], // Find by call_id
+                            [
+                                'agent_id' => $agent->id,
+                                'campaign_id' => $campaign->id,
+                                'provider_id' => $provider->id,
+                                'contact_id' => $contact->id,
+                                'call_status' => $callStatus ?? 'Unknown',
+                                'call_type' => 'distributor',
+                                'dial_duration' => 0,  
+                                'talking_duration' => 0,  
+                                'updated_at' => now(),
+                            ]
+                        );
+
+                        Log::info("CallLog upserted with ID: {$callLog->id}, Call ID: {$callId}, Status: {$callStatus}");
+                    }  
 
                 } else {
                     Log::error("Tenant {$tenant->name}: License validation failed. Cannot make calls.");

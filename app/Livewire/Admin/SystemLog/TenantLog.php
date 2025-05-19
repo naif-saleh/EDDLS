@@ -7,6 +7,7 @@ use App\Models\User;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Masmerise\Toaster\Toaster;
+use Illuminate\Support\Facades\Auth;
 
 class TenantLog extends Component
 {
@@ -19,6 +20,7 @@ class TenantLog extends Component
     public $action = '';
     public $dateFrom = '';
     public $dateTo = '';
+    public $tenantId = ''; // New filter for super admins
 
     // Search
     public $search = '';
@@ -38,7 +40,21 @@ class TenantLog extends Component
     public $availableModelTypes = [];
     public $availableLogTypes = [];
     public $availableActions = [];
+    public $availableTenants = []; // New property for super admins
 
+    public $showLogModal = false;
+ 
+    public function viewLogDetails($logId)
+    {
+        $this->selectedLog = SystemLog::find($logId);
+        $this->showLogModal = true;
+    }
+
+    public function closeLogDetails()
+    {
+        $this->showLogModal = false;
+        $this->selectedLog = null;
+    }
     // Reset pagination when filters change
     protected $queryString = [
         'logType' => ['except' => ''],
@@ -48,6 +64,7 @@ class TenantLog extends Component
         'search' => ['except' => ''],
         'dateFrom' => ['except' => ''],
         'dateTo' => ['except' => ''],
+        'tenantId' => ['except' => ''],
         'sortField' => ['except' => 'created_at'],
         'sortDirection' => ['except' => 'desc'],
         'perPage' => ['except' => 15],
@@ -57,27 +74,46 @@ class TenantLog extends Component
     {
         // Cache available filter options
         $this->loadFilterOptions();
+
+        // If user is not a super admin, set and lock their tenant_id
+        if (!Auth::user()->isSuperAdmin()) {
+            $this->tenantId = Auth::user()->tenant_id;
+        }
     }
 
     public function loadFilterOptions()
     {
+        $query = SystemLog::query();
+
+        // Apply tenant scope for non-super admins
+        if (!Auth::user()->isSuperAdmin()) {
+            $query->where('tenant_id', Auth::user()->tenant_id);
+        } elseif ($this->tenantId) {
+            $query->where('tenant_id', $this->tenantId);
+        }
+
         // Get unique model types
-        $this->availableModelTypes = SystemLog::select('model_type')
+        $this->availableModelTypes = $query->select('model_type')
             ->distinct()
             ->pluck('model_type')
             ->toArray();
 
         // Get unique log types
-        $this->availableLogTypes = SystemLog::select('log_type')
+        $this->availableLogTypes = $query->select('log_type')
             ->distinct()
             ->pluck('log_type')
             ->toArray();
 
         // Get unique actions
-        $this->availableActions = SystemLog::select('action')
+        $this->availableActions = $query->select('action')
             ->distinct()
             ->pluck('action')
             ->toArray();
+
+        // Load available tenants for super admins
+        if (Auth::user()->isSuperAdmin()) {
+            $this->availableTenants = \App\Models\Tenant::orderBy('name')->get();
+        }
     }
 
     public function updatingSearch()
@@ -115,6 +151,12 @@ class TenantLog extends Component
         $this->resetPage();
     }
 
+    public function updatingTenantId()
+    {
+        $this->resetPage();
+        $this->loadFilterOptions(); // Reload options when tenant changes
+    }
+
     public function sortBy($field)
     {
         if ($this->sortField === $field) {
@@ -134,30 +176,85 @@ class TenantLog extends Component
         $this->dateFrom = '';
         $this->dateTo = '';
         $this->search = '';
+        // Only reset tenantId if user is super admin
+        if (Auth::user()->isSuperAdmin()) {
+            $this->tenantId = '';
+        }
         $this->resetPage();
     }
 
-    public function viewLogDetails($logId)
-    {
-        $this->selectedLog = SystemLog::find($logId);
-        $this->viewingDetails = true;
+    // public function viewLogDetails($logId)
+    // {
+    //     $query = SystemLog::query();
+        
+    //     // Ensure tenant scope is respected
+    //     if (!Auth::user()->isSuperAdmin()) {
+    //         $query->where('tenant_id', Auth::user()->tenant_id);
+    //     }
 
-        $this->dispatch('open-modal', 'log-details-modal');
-    }
+    //     $this->selectedLog = $query->find($logId);
+        
+    //     if (!$this->selectedLog) {
+    //         Toaster::error('Log entry not found or access denied.');
+    //         return;
+    //     }
 
-    public function closeLogDetails()
-    {
-        $this->selectedLog = null;
-        $this->viewingDetails = false;
+    //     $this->viewingDetails = true;
+    //     $this->dispatch('open-modal', 'log-details-modal');
+    // }
 
-        $this->dispatch('close-modal', 'log-details-modal');
-    }
+    // public function closeLogDetails()
+    // {
+    //     $this->selectedLog = null;
+    //     $this->viewingDetails = false;
+    //     $this->dispatch('close-modal', 'log-details-modal');
+    // }
 
     public function getFormattedModelType($modelType)
     {
         // Remove namespace and just return the class name
         $parts = explode('\\', $modelType);
         return end($parts);
+    }
+
+    /**
+     * Compute the changes between previous and new data
+     *
+     * @param array|null $previousData
+     * @param array|null $newData
+     * @return array
+     */
+    public function computeChanges($previousData, $newData)
+    {
+        $changes = [];
+        
+        if (!$previousData || !$newData) {
+            return $changes;
+        }
+
+        // Get all unique keys from both arrays
+        $allKeys = array_unique(array_merge(array_keys($previousData), array_keys($newData)));
+
+        foreach ($allKeys as $key) {
+            // Skip internal fields
+            if (in_array($key, ['id', 'created_at', 'updated_at', 'deleted_at'])) {
+                continue;
+            }
+
+            $oldValue = $previousData[$key] ?? null;
+            $newValue = $newData[$key] ?? null;
+
+            // Only add to changes if the values are different
+            if ($oldValue !== $newValue) {
+                $changes[$key] = [
+                    'old' => $oldValue,
+                    'new' => $newValue,
+                    'changed' => true
+                ];
+            }
+        }
+
+        return $changes;
     }
 
     public function exportLogs()
@@ -170,6 +267,13 @@ class TenantLog extends Component
     public function render()
     {
         $query = SystemLog::query();
+
+        // Apply tenant scope for non-super admins
+        if (!Auth::user()->isSuperAdmin()) {
+            $query->where('tenant_id', Auth::user()->tenant_id);
+        } elseif ($this->tenantId) {
+            $query->where('tenant_id', $this->tenantId);
+        }
 
         // Apply filters
         if ($this->logType) {
@@ -213,14 +317,18 @@ class TenantLog extends Component
         $query->orderBy($this->sortField, $this->sortDirection);
 
         // Get logs with pagination and eager load relationships
-        $logs = $query->with('user')->paginate($this->perPage);
+        $logs = $query->with(['user', 'tenant'])->paginate($this->perPage);
 
-        // Get users for filter dropdown
-        $users = User::orderBy('name')->get();
+        // Get users for filter dropdown (scoped to tenant for non-super admins)
+        $usersQuery = User::orderBy('name');
+        if (!Auth::user()->isSuperAdmin()) {
+            $usersQuery->where('tenant_id', Auth::user()->tenant_id);
+        } elseif ($this->tenantId) {
+            $usersQuery->where('tenant_id', $this->tenantId);
+        }
+        $users = $usersQuery->get();
 
-
-
-         return view('livewire.admin.system-log.tenant-log', [
+        return view('livewire.admin.system-log.tenant-log', [
             'logs' => $logs,
             'users' => $users
         ]);

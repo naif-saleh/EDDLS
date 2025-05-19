@@ -1,4 +1,13 @@
 <div>
+    <!-- Error Message -->
+    @if (session()->has('error'))
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-4">
+            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative dark:bg-red-900 dark:border-red-700 dark:text-red-300" role="alert">
+                <span class="block sm:inline">{{ session('error') }}</span>
+            </div>
+        </div>
+    @endif
+
     <!-- Table Section -->
     <div class="max-w-[85rem] px-4 py-10 sm:px-6 lg:px-8 lg:py-14 mx-auto">
         <!-- Card -->
@@ -71,32 +80,54 @@
                         <!-- End Filters -->
 
                         <!-- Table -->
-                        <!-- After your existing table -->
-                        @if($showGroupedView)
-                        <!-- Grouped by Provider Table -->
                         <table class="min-w-full divide-y divide-gray-200 dark:divide-neutral-700">
                             <thead class="bg-gray-50 dark:bg-neutral-800">
                                 <tr>
                                     <th scope="col" class="px-6 py-3 text-start">
                                         <div class="flex items-center gap-x-2">
-                                            <span
-                                                class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
+                                            <span class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
+                                                Phone Number
+                                            </span>
+                                        </div>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-start">
+                                        <div class="flex items-center gap-x-2">
+                                            <span class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
                                                 Provider
                                             </span>
                                         </div>
                                     </th>
                                     <th scope="col" class="px-6 py-3 text-start">
                                         <div class="flex items-center gap-x-2">
-                                            <span
-                                                class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
-                                                Skipped Numbers Count
+                                            <span class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
+                                                File Name
                                             </span>
                                         </div>
                                     </th>
                                     <th scope="col" class="px-6 py-3 text-start">
                                         <div class="flex items-center gap-x-2">
-                                            <span
-                                                class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
+                                            <span class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
+                                                Row Number
+                                            </span>
+                                        </div>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-start">
+                                        <div class="flex items-center gap-x-2">
+                                            <span class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
+                                                Skip Reason
+                                            </span>
+                                        </div>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-start">
+                                        <div class="flex items-center gap-x-2">
+                                            <span class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
+                                                Created At
+                                            </span>
+                                        </div>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-start">
+                                        <div class="flex items-center gap-x-2">
+                                            <span class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
                                                 Actions
                                             </span>
                                         </div>
@@ -105,157 +136,47 @@
                             </thead>
 
                             <tbody class="divide-y divide-gray-200 dark:divide-neutral-700">
-                                @forelse($skippedNumbersByProvider as $groupedItem)
-                                <tr>
-                                    <td class="size-px whitespace-nowrap">
-                                        <div class="px-6 py-3">
-                                            <span class="text-sm text-gray-600 dark:text-neutral-400">{{
-                                                $groupedItem->name }}</span>
-                                        </div>
-                                    </td>
-                                    <td class="size-px whitespace-nowrap">
-                                        <div class="px-6 py-3">
-                                            <span
-                                                class="py-1 px-1.5 inline-flex items-center gap-x-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full dark:bg-blue-500/10 dark:text-blue-500">
-                                                {{ $groupedItem->count }}
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td class="size-px whitespace-nowrap">
-                                        <div class="px-6 py-3">
-                                            <button
-                                                wire:click="$set('selectedProvider', '{{ $groupedItem->id }}'); $set('showGroupedView', false);"
-                                                class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
-                                                View Details
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                                @empty
-                                <tr>
-                                    <td colspan="3"
-                                        class="px-6 py-4 text-center text-sm text-gray-500 dark:text-neutral-500">
-                                        No skipped numbers found
-                                    </td>
-                                </tr>
-                                @endforelse
-                            </tbody>
-                        </table>
-                        @else
-                        <table class="min-w-full divide-y divide-gray-200 dark:divide-neutral-700">
-                            <thead class="bg-gray-50 dark:bg-neutral-800">
-                                <tr>
-                                    <th scope="col" class="px-6 py-3 text-start">
-                                        <div class="flex items-center gap-x-2">
-                                            <span
-                                                class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
-                                                Provider
-                                            </span>
-                                        </div>
-                                    </th>
-
-
-                                    <th scope="col" class="px-6 py-3 text-start">
-                                        <div class="flex items-center gap-x-2">
-                                            <span
-                                                class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
-                                                Extension
-                                            </span>
-                                        </div>
-                                    </th>
-
-                                    <th scope="col" class="px-6 py-3 text-start">
-                                        <div class="flex items-center gap-x-2">
-                                            <span
-                                                class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
-                                                Phone Number
-                                            </span>
-                                        </div>
-                                    </th>
-
-                                    <th scope="col" class="px-6 py-3 text-start">
-                                        <div class="flex items-center gap-x-2">
-                                            <span
-                                                class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
-                                                Campaign
-                                            </span>
-                                        </div>
-                                    </th>
-
-                                    <th scope="col" class="px-6 py-3 text-start">
-                                        <div class="flex items-center gap-x-2">
-                                            <span
-                                                class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
-                                                Skip Reason
-                                            </span>
-                                        </div>
-                                    </th>
-
-                                    <th scope="col" class="px-6 py-3 text-start">
-                                        <div class="flex items-center gap-x-2">
-                                            <span
-                                                class="text-xs font-semibold uppercase text-gray-800 dark:text-neutral-200">
-                                                Created At
-                                            </span>
-                                        </div>
-                                    </th>
-
-
-                                </tr>
-                            </thead>
-
-                            <tbody class="divide-y divide-gray-200 dark:divide-neutral-700">
                                 @forelse($skippedNumbers as $skipped)
-                                <tr>
-
-                                    <td class="size-px whitespace-nowrap">
-                                        <div class="px-6 py-3">
-                                            <span class="text-sm text-gray-600 dark:text-neutral-400">{{
-                                                $skipped->provider->name ?? 'null'
-                                                }}</span>
-                                        </div>
+                                <tr class="hover:bg-gray-50 dark:hover:bg-neutral-800">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                        {{ $skipped->phone_number }}
                                     </td>
-                                    <td class="size-px whitespace-nowrap">
-                                        <div class="px-6 py-3">
-                                            <span class="text-sm text-gray-600 dark:text-neutral-400">{{
-                                                $skipped->provider->extension ?? 'null'
-                                                }}</span>
-                                        </div>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                        {{ $skipped->provider->name ?? 'N/A' }}
+                                        @if($skipped->provider && $skipped->provider->extension)
+                                            <span class="text-xs text-gray-500 dark:text-neutral-400">({{ $skipped->provider->extension }})</span>
+                                        @endif
                                     </td>
-
-                                    <td class="size-px whitespace-nowrap">
-                                        <div class="px-6 py-3">
-                                            <span class="text-sm text-gray-600 dark:text-neutral-400">{{
-                                                $skipped->phone_number }}</span>
-                                        </div>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                        {{ $skipped->file_name ?? 'N/A' }}
                                     </td>
-
-                                    <td class="size-px whitespace-nowrap">
-                                        <div class="px-6 py-3">
-                                            <span class="text-sm text-gray-600 dark:text-neutral-400">{{
-                                                $skipped->campaign->name ?? 'null' }}</span>
-                                        </div>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                        {{ $skipped->row_number ?? 'N/A' }}
                                     </td>
-                                    <td class="size-px whitespace-nowrap">
-                                        <div class="px-6 py-3">
-                                            <span
-                                                class="py-1 px-1.5 inline-flex items-center gap-x-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full dark:bg-orange-500/10 dark:text-orange-500">
-                                                {{ $skipped->skip_reason ?? 'null' }}
-                                            </span>
-                                        </div>
+                                    <td class="px-6 py-4 whitespace-normal text-sm">
+                                        <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full
+                                            bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300">
+                                            {{ $skipped->skip_reason }}
+                                        </span>
                                     </td>
-                                    <td class="size-px whitespace-nowrap">
-                                        <div class="px-6 py-3">
-                                            <span class="text-sm text-gray-500 dark:text-neutral-500">{{
-                                                $skipped->created_at->diffForHumans() }}</span>
-                                        </div>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                        {{ $skipped->created_at->format('Y-m-d H:i:s') }}
                                     </td>
-
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                        @if($skipped->raw_data)
+                                        <button 
+                                            @click="$dispatch('open-modal', { rawData: '{{ addslashes(json_encode($skipped->raw_data)) }}' })"
+                                            class="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">
+                                            View Details
+                                        </button>
+                                        @else
+                                        <span class="text-gray-400 dark:text-neutral-500">No Details</span>
+                                        @endif
+                                    </td>
                                 </tr>
                                 @empty
                                 <tr>
-                                    <td colspan="6"
-                                        class="px-6 py-4 text-center text-sm text-gray-500 dark:text-neutral-500">
+                                    <td colspan="7" class="px-6 py-4 text-center text-sm text-gray-500 dark:text-neutral-400">
                                         No skipped numbers found
                                     </td>
                                 </tr>
@@ -263,7 +184,6 @@
                             </tbody>
                         </table>
                         <!-- End Table -->
-                        @endif
 
 
                         <!-- Footer -->

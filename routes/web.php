@@ -26,6 +26,7 @@ use App\Livewire\Systems\Dialer\DialerCallsReport;
 use App\Livewire\Systems\Dialer\ProvidersList;
 use App\Livewire\Systems\Distributor\AgentList;
 use App\Livewire\Systems\Distributor\ProvidersList as DistributorProvidersList;
+use App\Livewire\Systems\Distributor\DistributorCallsReport;
 use App\Livewire\Systems\SkippedNumbers\DialerSkippedNumbers;
 use App\Livewire\Systems\SkippedNumbers\DistributorSkippedNumbers;
 use App\Livewire\Tenant\EmployeeForm;
@@ -66,6 +67,9 @@ Route::prefix('admin')->name('admin.')->middleware('only.admin')->group(function
     Route::get('licesnse-content/{license_id}', LicenseContent::class)->name('license.content');
     Route::get('licesnse-update/{license_id}', LicenseUpdate::class)->name('license.update');
 
+    // System Log
+    Route::get('system-log-view', TenantLog::class)->name('system.log');
+
 });
 
 // Tenant routes with tenant middleware
@@ -103,6 +107,7 @@ Route::prefix('tenant/{tenant:slug}')->name('tenant.')->middleware(['auth', 'ten
     Route::get('/distributor/provider/{provider}/agent/{agent}/campaign-create', DistributorCampaignsForm::class)->name('distributor.provider.campaigns.create');
     Route::get('/distributor/provider/{provider}/agent/{agent}/campaign/{campaign:slug}/contact', DistributorCampaignsDetails::class)->name('distributor.provider.campaign.contact');
     Route::get('/distributor/skipped-numbers', DistributorSkippedNumbers::class)->name('distributor.skipped.numbers');
+    Route::get('/distributor/calls-report', DistributorCallsReport::class)->name('distributor.calls.report');
 
 });
 

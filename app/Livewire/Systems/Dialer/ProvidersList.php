@@ -262,8 +262,11 @@ class ProvidersList extends Component
             return;
         }
 
+        $originalStatus = $provider->status;
+        $newStatus = $isChecked ? 'active' : 'inactive';
+
         $provider->update([
-            'status' => $isChecked ? 'active' : 'inactive',
+            'status' => $newStatus,
         ]);
 
         // Log status change

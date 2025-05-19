@@ -27,7 +27,7 @@
                     wire:navigate>
                     {{ __('Dialer System') }}
                 </flux:navlist.item>
-                <flux:navlist.item icon="phone"
+                <flux:navlist.item icon="clipboard-document-list"
                     :href="route('tenant.dialer.calls.report', ['tenant' => auth()->user()->tenant->slug])"
                     :current="request()->routeIs('tenant.dialer.calls.report', ['tenant' => auth()->user()->tenant->slug])"
                     wire:navigate>
@@ -49,6 +49,12 @@
                     :current="request()->routeIs('tenant.distributor.agents', ['tenant' => auth()->user()->tenant->slug])"
                     wire:navigate>
                     {{ __('Distributor System') }}
+                </flux:navlist.item>
+                <flux:navlist.item icon="clipboard-document-list"
+                    :href="route('tenant.distributor.calls.report', ['tenant' => auth()->user()->tenant->slug])"
+                    :current="request()->routeIs('tenant.distributor.calls.report', ['tenant' => auth()->user()->tenant->slug])"
+                    wire:navigate>
+                    {{ __('Calls Report') }}
                 </flux:navlist.item>
                 <flux:navlist.item icon="archive-box-x-mark"
                     :href="route('tenant.distributor.skipped.numbers', ['tenant' => auth()->user()->tenant->slug])"
@@ -78,6 +84,13 @@
                         :href="route('tenant.settings', ['tenant' => auth()->user()->tenant->slug])"
                         :current="request()->routeIs('tenant.settings', ['tenant' => auth()->user()->tenant->slug])"
                         wire:navigate>{{ __('Tenant Settings ') }}
+                    </flux:navlist.item>
+
+                    {{-- System Log --}}
+                    <flux:navlist.item icon="document-magnifying-glass"
+                        :href="route('tenant.system.log', ['tenant' => auth()->user()->tenant->slug])"
+                        :current="request()->routeIs('tenant.system.log', ['tenant' => auth()->user()->tenant->slug])"
+                        wire:navigate>{{ __('System Log ') }}
                     </flux:navlist.item>
 
                     @if (auth()->check() && auth()->user()->isTenantAdmin())

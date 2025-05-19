@@ -34,6 +34,19 @@
                 </div>
             </div>
 
+            @if(auth()->user()->isSuperAdmin())
+            <!-- Tenant Filter (Super Admin Only) -->
+            <div>
+                <label for="tenantId" class="block text-sm font-medium text-gray-700 dark:text-neutral-300 mb-1">Tenant</label>
+                <select wire:model.live="tenantId" id="tenantId" class="block w-full border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-neutral-700 dark:border-neutral-600 dark:text-white">
+                    <option value="">All Tenants</option>
+                    @foreach($availableTenants as $tenant)
+                        <option value="{{ $tenant->id }}">{{ $tenant->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            @endif
+
             <!-- Log Type -->
             <div>
                 <label for="logType" class="block text-sm font-medium text-gray-700 dark:text-neutral-300 mb-1">Log Type</label>
@@ -49,7 +62,7 @@
             <div>
                 <label for="modelType" class="block text-sm font-medium text-gray-700 dark:text-neutral-300 mb-1">Model Type</label>
                 <select wire:model.live="modelType" id="modelType" class="block w-full border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-neutral-700 dark:border-neutral-600 dark:text-white">
-                    <option value="">All Models</option>
+                    <option >All Models</option>
                     @foreach($availableModelTypes as $type)
                         <option value="{{ $type }}">{{ $this->getFormattedModelType($type) }}</option>
                     @endforeach
@@ -229,6 +242,9 @@
                                     <div class="ml-2">
                                         <div class="text-sm font-medium">{{ $log->user->name }}</div>
                                         <div class="text-xs text-gray-500 dark:text-neutral-400">{{ $log->user->email }}</div>
+                                        @if(auth()->user()->isSuperAdmin())
+                                        <div class="text-xs text-gray-500 dark:text-neutral-400">{{ $log->tenant?->name ?? 'No Tenant' }}</div>
+                                        @endif
                                     </div>
                                 </div>
                             @else
@@ -265,82 +281,82 @@
     </div>
 
     <!-- Log Details Modal -->
-    <div wire:ignore>
-        <div id="log-details-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-            <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-                <div x-show="open" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
+<div>
+    @if($selectedLog)
+    <div id="log-details-modal" class="fixed inset-0 z-50 overflow-y-auto {{ $showLogModal ? '' : 'hidden' }}" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
 
-                <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
 
-                <div x-show="open" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95" x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100" x-transition:leave="ease-in duration-200" x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100" x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95" class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full dark:bg-neutral-800">
-                    @if($selectedLog)
-                        <div class="bg-white dark:bg-neutral-800 px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                            <div class="sm:flex sm:items-start">
-                                <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
-                                    <h3 class="text-lg leading-6 font-medium text-gray-900 dark:text-white" id="modal-title">
-                                        Log Details
-                                    </h3>
-                                    <div class="mt-4 space-y-4">
-                                        <div>
-                                            <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Log Type</h4>
-                                            <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->log_type }}</p>
-                                        </div>
-                                        <div>
-                                            <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Date & Time</h4>
-                                            <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->created_at->format('F d, Y H:i:s') }}</p>
-                                        </div>
-                                        <div>
-                                            <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">User</h4>
-                                            <p class="mt-1 text-sm text-gray-900 dark:text-white">
-                                                @if($selectedLog->user)
-                                                    {{ $selectedLog->user->name }} ({{ $selectedLog->user->email }})
-                                                @else
-                                                    System
-                                                @endif
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">IP Address</h4>
-                                            <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->ip_address }}</p>
-                                        </div>
-                                        <div>
-                                            <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Action</h4>
-                                            <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->action }}</p>
-                                        </div>
-                                        <div>
-                                            <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Model Type</h4>
-                                            <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->model_type ? $this->getFormattedModelType($selectedLog->model_type) : 'N/A' }}</p>
-                                        </div>
-                                        <div>
-                                            <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Model ID</h4>
-                                            <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->model_id ?? 'N/A' }}</p>
-                                        </div>
-                                        <div>
-                                            <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Description</h4>
-                                            <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->description }}</p>
-                                        </div>
-                                        @if($selectedLog->properties)
-                                            <div>
-                                                <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Properties</h4>
-                                                <div class="mt-1 bg-gray-50 dark:bg-neutral-700 rounded-md p-3 overflow-auto max-h-64">
-                                                    <pre class="text-xs text-gray-900 dark:text-white whitespace-pre-wrap">{{ json_encode($selectedLog->properties, JSON_PRETTY_PRINT) }}</pre>
-                                                </div>
-                                            </div>
-                                        @endif
-                                    </div>
+            <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full dark:bg-neutral-800">
+                <div class="bg-white dark:bg-neutral-800 px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                    <div class="sm:flex sm:items-start">
+                        <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+                            <h3 class="text-lg leading-6 font-medium text-gray-900 dark:text-white" id="modal-title">
+                                Log Details
+                            </h3>
+                            <div class="mt-4 space-y-4">
+                                <div>
+                                    <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Log Type</h4>
+                                    <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->log_type }}</p>
                                 </div>
+                                <div>
+                                    <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Date & Time</h4>
+                                    <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->created_at->format('F d, Y H:i:s') }}</p>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">User</h4>
+                                    <p class="mt-1 text-sm text-gray-900 dark:text-white">
+                                        @if($selectedLog->user)
+                                            {{ $selectedLog->user->name }} ({{ $selectedLog->user->email }})
+                                        @else
+                                            System
+                                        @endif
+                                    </p>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">IP Address</h4>
+                                    <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->ip_address }}</p>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Action</h4>
+                                    <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->action }}</p>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Model Type</h4>
+                                    <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->model_type ? $this->getFormattedModelType($selectedLog->model_type) : 'N/A' }}</p>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Model ID</h4>
+                                    <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ $selectedLog->model_id ?? 'N/A' }}</p>
+                                </div>
+                                <div>
+                                    <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Description</h4>
+                                    <p class="mt-1 text-sm text-gray-900 dark:text-white break-words">{{ $selectedLog->description }}</p>
+                                </div>
+                                @if($selectedLog->properties)
+                                    <div>
+                                        <h4 class="text-sm font-medium text-gray-500 dark:text-neutral-400">Properties</h4>
+                                        <div class="mt-1 bg-gray-50 dark:bg-neutral-700 rounded-md p-3 overflow-auto max-h-64">
+                                            <pre class="text-xs text-gray-900 dark:text-white whitespace-pre-wrap">{{ json_encode($selectedLog->properties, JSON_PRETTY_PRINT) }}</pre>
+                                        </div>
+                                    </div>
+                                @endif
                             </div>
                         </div>
-                        <div class="bg-gray-50 dark:bg-neutral-700 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                            <button wire:click="closeLogDetails" type="button" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm">
-                                Close
-                            </button>
-                        </div>
-                    @endif
+                    </div>
+                </div>
+                <div class="bg-gray-50 dark:bg-neutral-700 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                    <button wire:click="closeLogDetails" type="button" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm">
+                        Close
+                    </button>
                 </div>
             </div>
         </div>
     </div>
+    @endif
+</div>
 
     <script>
         document.addEventListener('livewire:initialized', function () {

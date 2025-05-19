@@ -5,6 +5,7 @@ namespace App\Http\Livewire\Contacts;
 use App\Models\Campaign;
 use App\Models\Contact;
 use App\Models\Provider;
+use App\Services\SystemLogService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -30,11 +31,23 @@ class ContactImporter extends Component
 
     public bool $showModal = false;
 
+    protected function getSystemLogService(): SystemLogService
+    {
+        return app(SystemLogService::class);
+    }
+
     protected $listeners = ['openContactImport' => 'show'];
 
     public function show()
     {
         $this->showModal = true;
+        
+        // Log modal open
+        $this->getSystemLogService()->log(
+            logType: 'ui_action',
+            action: 'open_contact_import',
+            description: 'Opened contact import modal'
+        );
     }
 
     protected $rules = [
@@ -56,172 +69,206 @@ class ContactImporter extends Component
     {
         $this->validate();
 
-        $this->isProcessing = true;
-        $this->progress = 0;
+        try {
+            $this->isProcessing = true;
+            $this->progress = 0;
 
-        $path = $this->csvFile->getRealPath();
-        $file = fopen($path, 'r');
+            $path = $this->csvFile->getRealPath();
+            $file = fopen($path, 'r');
 
-        // Read and validate header row
-        $header = fgetcsv($file);
+            // Read and validate header row
+            $header = fgetcsv($file);
+            $header = array_map(function ($item) {
+                return trim(strtolower($item));
+            }, $header);
 
-        // Convert headers to lowercase and trim whitespace for consistency
-        $header = array_map(function ($item) {
-            return trim(strtolower($item));
-        }, $header);
+            // Check required columns
+            $requiredColumns = ['phone_number', 'provider_name', 'provider_extension', 'start_time', 'end_time'];
+            $missingColumns = array_diff($requiredColumns, $header);
 
-        // Check if the required columns exist in the CSV
-        $requiredColumns = ['phone_number', 'provider_name', 'provider_extension', 'start_time', 'end_time'];
-        $missingColumns = array_diff($requiredColumns, $header);
+            if (!empty($missingColumns)) {
+                $this->addError('csvFile', 'CSV is missing required columns: '.implode(', ', $missingColumns));
+                
+                // Log validation error
+                $this->getSystemLogService()->log(
+                    logType: 'validation',
+                    action: 'contact_import_validation_failed',
+                    description: 'CSV file missing required columns',
+                    metadata: [
+                        'missing_columns' => $missingColumns,
+                        'file_name' => $this->csvFile->getClientOriginalName()
+                    ]
+                );
+                
+                fclose($file);
+                $this->isProcessing = false;
+                return;
+            }
 
-        if (! empty($missingColumns)) {
-            $this->addError('csvFile', 'CSV is missing required columns: '.implode(', ', $missingColumns));
-            fclose($file);
-            $this->isProcessing = false;
+            // Count total contacts
+            $lineCount = 0;
+            while (fgetcsv($file) !== false) {
+                $lineCount++;
+            }
+            $this->totalContacts = $lineCount;
 
-            return;
-        }
+            // Log import start
+            $this->getSystemLogService()->log(
+                logType: 'import',
+                action: 'contact_import_started',
+                description: 'Started processing contact import',
+                metadata: [
+                    'file_name' => $this->csvFile->getClientOriginalName(),
+                    'total_contacts' => $this->totalContacts,
+                    'processing_id' => $this->processingId
+                ]
+            );
 
-        // Count total contacts for progress tracking
-        $lineCount = 0;
-        while (fgetcsv($file) !== false) {
-            $lineCount++;
-        }
-        $this->totalContacts = $lineCount;
+            // Reset file pointer
+            rewind($file);
+            fgetcsv($file); // Skip header row
 
-        // Reset file pointer
-        rewind($file);
-        fgetcsv($file); // Skip header row
+            // Process file in batches
+            DB::transaction(function () use ($file, $header) {
+                $tenantId = Auth::user()->tenant_id;
+                $providerCache = [];
+                $campaignCache = [];
+                $batchSize = 100;
+                $currentRow = 0;
+                $batch = [];
+                $processedProviders = [];
+                $processedCampaigns = [];
 
-        // Start processing in chunks
-        $batchSize = 100;
-        $currentRow = 0;
-        $batch = [];
+                while (($row = fgetcsv($file)) !== false) {
+                    $currentRow++;
+                    $data = array_combine($header, $row);
 
-        // Store batch info in cache for background processing
-        $cacheKey = "contact-import-{$this->processingId}";
-        cache()->put($cacheKey, [
-            'total' => $this->totalContacts,
-            'processed' => 0,
-        ], now()->addHours(1));
-
-        // Start polling for progress updates
-        $this->pollingInterval = 1000; // 1 second
-
-        // Process file in batches to prevent timeouts
-        DB::transaction(function () use ($file, $header, $batchSize, &$currentRow, &$batch) {
-            $tenantId = Auth::user()->tenant_id;
-            $providerCache = [];
-            $campaignCache = [];
-
-            while (($row = fgetcsv($file)) !== false) {
-                $currentRow++;
-
-                // Create an associative array from row data
-                $data = array_combine($header, $row);
-
-                // Clean and validate phone number
-                $phoneNumber = preg_replace('/[^0-9]/', '', $data['phone_number']);
-                if (empty($phoneNumber)) {
-                    continue; // Skip invalid phone numbers
-                }
-
-                // Get or create provider
-                $providerKey = $data['provider_name'].'_'.$data['provider_extension'];
-                if (! isset($providerCache[$providerKey])) {
-                    $provider = Provider::firstOrCreate(
-                        [
-                            'name' => $data['provider_name'],
-                            'extension' => $data['provider_extension'],
-                            'tenant_id' => $tenantId,
-                        ],
-                        [
-                            'slug' => Str::slug($data['provider_name'].'-'.$data['provider_extension'].'-'.uniqid()),
-                            'status' => 'active',
-                            'provider_type' => 'dialer', // Default type, adjust as needed
-                        ]
-                    );
-                    $providerCache[$providerKey] = $provider->id;
-                }
-                $providerId = $providerCache[$providerKey];
-
-                // Parse dates
-                try {
-                    $startTime = Carbon::parse($data['start_time']);
-                    $endTime = Carbon::parse($data['end_time']);
-                } catch (\Exception $e) {
-                    // Skip if dates are invalid
-                    continue;
-                }
-
-                // Create or get campaign
-                $campaignKey = $providerId.'_'.$startTime->format('YmdHis').'_'.$endTime->format('YmdHis');
-                if (! isset($campaignCache[$campaignKey])) {
-                    $campaignName = $data['provider_name'].' '.$startTime->format('Y-m-d H:i');
-                    $campaign = Campaign::firstOrCreate(
-                        [
-                            'provider_id' => $providerId,
-                            'tenant_id' => $tenantId,
-                            'start_time' => $startTime,
-                            'end_time' => $endTime,
-                        ],
-                        [
-                            'slug' => Str::slug($campaignName.'-'.uniqid()),
-                            'name' => $campaignName,
-                            'status' => 'not_start',
-                            'campaign_type' => 'dialer', // Default type, adjust as needed
-                            'contact_count' => 0,
-                        ]
-                    );
-                    $campaignCache[$campaignKey] = $campaign->id;
-                }
-                $campaignId = $campaignCache[$campaignKey];
-
-                // Add contact to batch
-                $batch[] = [
-                    'slug' => Str::slug('contact-'.$phoneNumber.'-'.uniqid()),
-                    'campaign_id' => $campaignId,
-                    'phone_number' => $phoneNumber,
-                    'status' => 'new',
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ];
-
-                // Insert batch if needed
-                if (count($batch) >= $batchSize) {
-                    Contact::insert($batch);
-
-                    // Update campaign contact count
-                    foreach (array_count_values(array_column($batch, 'campaign_id')) as $campId => $count) {
-                        Campaign::where('id', $campId)->increment('contact_count', $count);
+                    // Process provider
+                    $providerKey = $data['provider_name'].'_'.$data['provider_extension'];
+                    if (!isset($providerCache[$providerKey])) {
+                        $provider = Provider::firstOrCreate(
+                            [
+                                'name' => $data['provider_name'],
+                                'extension' => $data['provider_extension'],
+                                'tenant_id' => $tenantId,
+                            ],
+                            [
+                                'slug' => Str::slug($data['provider_name'].'-'.$data['provider_extension'].'-'.uniqid()),
+                                'status' => 'active',
+                                'provider_type' => 'dialer',
+                            ]
+                        );
+                        $providerCache[$providerKey] = $provider->id;
+                        $processedProviders[] = $provider;
                     }
 
-                    // Update progress
+                    // Process campaign
+                    try {
+                        $startTime = Carbon::parse($data['start_time']);
+                        $endTime = Carbon::parse($data['end_time']);
+                        
+                        $campaignKey = $providerCache[$providerKey].'_'.$startTime->format('YmdHis').'_'.$endTime->format('YmdHis');
+                        if (!isset($campaignCache[$campaignKey])) {
+                            $campaignName = $data['provider_name'].' '.$startTime->format('Y-m-d H:i');
+                            $campaign = Campaign::firstOrCreate(
+                                [
+                                    'provider_id' => $providerCache[$providerKey],
+                                    'tenant_id' => $tenantId,
+                                    'start_time' => $startTime,
+                                    'end_time' => $endTime,
+                                ],
+                                [
+                                    'slug' => Str::slug($campaignName.'-'.uniqid()),
+                                    'name' => $campaignName,
+                                    'status' => 'not_start',
+                                    'campaign_type' => 'dialer',
+                                    'contact_count' => 0,
+                                ]
+                            );
+                            $campaignCache[$campaignKey] = $campaign->id;
+                            $processedCampaigns[] = $campaign;
+                        }
+
+                        // Add contact to batch
+                        $phoneNumber = preg_replace('/[^0-9]/', '', $data['phone_number']);
+                        if (!empty($phoneNumber)) {
+                            $batch[] = [
+                                'slug' => Str::slug('contact-'.$phoneNumber.'-'.uniqid()),
+                                'campaign_id' => $campaignCache[$campaignKey],
+                                'phone_number' => $phoneNumber,
+                                'status' => 'new',
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ];
+                        }
+
+                        // Process batch if needed
+                        if (count($batch) >= $batchSize) {
+                            $this->processBatch($batch, $campaignCache);
+                            $this->updateProgress($currentRow);
+                            $batch = [];
+                        }
+                    } catch (\Exception $e) {
+                        // Log date parsing error
+                        $this->getSystemLogService()->log(
+                            logType: 'error',
+                            action: 'contact_import_date_parse_error',
+                            description: 'Failed to parse dates in contact import',
+                            metadata: [
+                                'row_number' => $currentRow,
+                                'error' => $e->getMessage(),
+                                'data' => $data
+                            ]
+                        );
+                        continue;
+                    }
+                }
+
+                // Process remaining contacts
+                if (count($batch) > 0) {
+                    $this->processBatch($batch, $campaignCache);
                     $this->updateProgress($currentRow);
-
-                    // Clear batch
-                    $batch = [];
-                }
-            }
-
-            // Insert remaining contacts
-            if (count($batch) > 0) {
-                Contact::insert($batch);
-
-                // Update campaign contact count
-                foreach (array_count_values(array_column($batch, 'campaign_id')) as $campId => $count) {
-                    Campaign::where('id', $campId)->increment('contact_count', $count);
                 }
 
-                // Update final progress
-                $this->updateProgress($currentRow);
-            }
+                // Log import completion
+                $this->getSystemLogService()->log(
+                    logType: 'import',
+                    action: 'contact_import_completed',
+                    description: 'Completed processing contact import',
+                    metadata: [
+                        'total_processed' => $currentRow,
+                        'providers_created' => count($processedProviders),
+                        'campaigns_created' => count($processedCampaigns),
+                        'processing_id' => $this->processingId
+                    ]
+                );
+            });
 
-            // Mark as completed
-            $this->completeImport();
-        });
+            fclose($file);
+        } catch (\Exception $e) {
+            // Log import error
+            $this->getSystemLogService()->log(
+                logType: 'error',
+                action: 'contact_import_failed',
+                description: 'Contact import process failed',
+                metadata: [
+                    'error' => $e->getMessage(),
+                    'stack_trace' => $e->getTraceAsString(),
+                    'processing_id' => $this->processingId
+                ]
+            );
+            throw $e;
+        }
+    }
 
-        fclose($file);
+    private function processBatch(array $batch, array $campaignCache)
+    {
+        Contact::insert($batch);
+
+        // Update campaign contact counts
+        foreach (array_count_values(array_column($batch, 'campaign_id')) as $campId => $count) {
+            Campaign::where('id', $campId)->increment('contact_count', $count);
+        }
     }
 
     private function updateProgress($processed)
@@ -232,7 +279,6 @@ class ContactImporter extends Component
             'processed' => $processed,
         ], now()->addHours(1));
 
-        // Calculate progress percentage
         if ($this->totalContacts > 0) {
             $this->progress = min(round(($processed / $this->totalContacts) * 100), 100);
         } else {
@@ -252,7 +298,6 @@ class ContactImporter extends Component
                 $this->progress = 100;
             }
 
-            // If completed, stop polling
             if ($this->progress >= 100) {
                 $this->completeImport();
             }
@@ -270,6 +315,7 @@ class ContactImporter extends Component
         $cacheKey = "contact-import-{$this->processingId}";
         cache()->forget($cacheKey);
     }
+
     public function render()
     {
         return view('livewire.systems.dialer.contact-import');
