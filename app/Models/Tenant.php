@@ -20,6 +20,14 @@ class Tenant extends Model
         'phone',
         'status',
         'api_key',
+        'database_name',
+        'database_username',
+        'database_password',
+        'database_created',
+    ];
+
+    protected $hidden = [
+        'database_password',
     ];
 
     /**

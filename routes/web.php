@@ -35,12 +35,14 @@ use App\Livewire\Users\UserList;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return view('welcome');
+    if(auth()->check() && auth()->user()->isSuperAdmin()){
+        return redirect()->route('admin.dashboard');
+    }else{
+        return redirect()->route('tenant.dashboard', ['tenant' => auth()->user()->tenant->slug]);
+    }
 })->name('home');
 
-Route::view('dashboard', 'dashboard')
-    ->middleware(['auth', 'verified'])
-    ->name('dashboard');
+ 
 
 Route::middleware(['auth'])->group(function () {
     Route::redirect('settings', 'settings/profile');
@@ -73,7 +75,7 @@ Route::prefix('admin')->name('admin.')->middleware('only.admin')->group(function
 });
 
 // Tenant routes with tenant middleware
-Route::prefix('tenant/{tenant:slug}')->name('tenant.')->middleware(['auth', 'tenant.access'])->group(function () {
+Route::prefix('tenant/{tenant:slug}')->name('tenant.')->middleware(['auth', 'tenant.access', 'tenant'])->group(function () {
     // Api Integration
     Route::get('/api-integration', CradentialsForm::class)->name('integration.form');
 

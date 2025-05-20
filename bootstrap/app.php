@@ -15,7 +15,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'tenant.access' => \App\Http\Middleware\CheckTenantAccess::class,
             'only.admin' => \App\Http\Middleware\onlyAdmin::class,
-            'verify.provider.tenant' => \App\Http\Middleware\VerifyProviderBelongsToTenant::class
+            'verify.provider.tenant' => \App\Http\Middleware\VerifyProviderBelongsToTenant::class,
+            'tenant' => \App\Http\Middleware\TenantDatabaseMiddleware::class
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
