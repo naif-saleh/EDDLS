@@ -29,6 +29,7 @@ use App\Livewire\Systems\Distributor\ProvidersList as DistributorProvidersList;
 use App\Livewire\Systems\Distributor\DistributorCallsReport;
 use App\Livewire\Systems\SkippedNumbers\DialerSkippedNumbers;
 use App\Livewire\Systems\SkippedNumbers\DistributorSkippedNumbers;
+use App\Livewire\Tenant\EmployeeEdit;
 use App\Livewire\Tenant\EmployeeForm;
 use App\Livewire\Tenant\EmployeeList;
 use App\Livewire\Users\UserList;
@@ -37,12 +38,14 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     if(auth()->check() && auth()->user()->isSuperAdmin()){
         return redirect()->route('admin.dashboard');
-    }else{
+    }elseif(auth()->check() && auth()->user()->isTenantAdmin() || auth()->check() && auth()->user()->isAgent()){
         return redirect()->route('tenant.dashboard', ['tenant' => auth()->user()->tenant->slug]);
+    } else{
+        return redirect()->route('login');
     }
 })->name('home');
 
- 
+
 
 Route::middleware(['auth'])->group(function () {
     Route::redirect('settings', 'settings/profile');
@@ -53,7 +56,7 @@ Route::middleware(['auth'])->group(function () {
 });
 
 // Admin Routes
-Route::prefix('admin')->name('admin.')->middleware('only.admin')->group(function () {
+Route::prefix('admin')->name('admin.')->middleware(['only.admin', 'license.management'])->group(function () {
     // Admin Dashboard
     Route::get('dashboard', AdminStats::class)->name('dashboard');
 
@@ -74,13 +77,20 @@ Route::prefix('admin')->name('admin.')->middleware('only.admin')->group(function
 
 });
 
+
+
+// License routes - use main database
+Route::prefix('tenant/{tenant:slug}')->name('tenant.')->middleware(['auth', 'tenant.access', 'license.management'])->group(function () {
+    // License View only
+    Route::get('license-information', LicenseForTenant::class)->name('license.tenant');
+});
 // Tenant routes with tenant middleware
-Route::prefix('tenant/{tenant:slug}')->name('tenant.')->middleware(['auth', 'tenant.access', 'tenant'])->group(function () {
+Route::prefix('tenant/{tenant:slug}')->name('tenant.')->middleware(['auth', 'tenant.access',  'tenant.database', 'share.license'])->group(function () {
     // Api Integration
     Route::get('/api-integration', CradentialsForm::class)->name('integration.form');
 
-    // License View
-    Route::get('licesnse-information', LicenseForTenant::class)->name('license.tenant');
+    // // License View
+    // Route::get('licesnse-information', LicenseForTenant::class)->name('license.tenant');
 
     // System Log
     Route::get('system-log-view', TenantLog::class)->name('system.log');
@@ -91,6 +101,7 @@ Route::prefix('tenant/{tenant:slug}')->name('tenant.')->middleware(['auth', 'ten
     // Manage Employees
     Route::get('manage-employees', EmployeeList::class)->name('employees.list');
     Route::get('manage-employees/create-employee', EmployeeForm::class)->name('employees.create');
+    Route::get('manage-employees/edit-employee/{employee_id}', EmployeeEdit::class)->name('employees.edit');
 
     Route::get('/dashboard', AgentStats::class)->name('dashboard');
     // Dialer Routes

@@ -16,7 +16,6 @@ Schedule::command('calls:dialer-update-statuses')->everySecond();
 
 Schedule::command('app:distributor-make-call-command')->everySecond();
 
-
 Schedule::command('app:distributor-update-call-status')->everySecond();
 
 

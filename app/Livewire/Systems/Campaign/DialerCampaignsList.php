@@ -8,6 +8,7 @@ use App\Models\Campaign;
 use App\Models\Provider;
 use App\Models\Tenant;
 use App\Services\SystemLogService;
+use App\Services\TenantService;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Maatwebsite\Excel\Facades\Excel;
@@ -49,6 +50,9 @@ class DialerCampaignsList extends Component
 
     public function mount(Tenant $tenant, Provider $provider, Agent $agent, Excel $excel)
     {
+
+        
+
         abort_unless($provider->tenant_id === $tenant->id, 403, 'Provider does not belong to tenant.');
         $this->excel = $excel;
         $this->provider = $provider;

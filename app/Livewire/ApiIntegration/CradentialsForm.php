@@ -6,6 +6,8 @@ use App\Models\ApiIntegration;
 use Livewire\Component;
 use Masmerise\Toaster\Toaster;
 use App\Services\SystemLogService;
+use App\Services\TenantService;
+use Illuminate\Support\Facades\Auth;
 
 class CradentialsForm extends Component
 {
@@ -29,7 +31,7 @@ class CradentialsForm extends Component
     public function mount()
     {
         $this->tenant = auth()->user()->tenant_id;
-        $this->cradentials = ApiIntegration::where('tenant_id', $this->tenant)->first();
+        $this->cradentials = ApiIntegration::on('tenant')->where('tenant_id', $this->tenant)->first();
 
         if ($this->cradentials) {
             $this->pbxUrl = $this->cradentials->pbx_url;
@@ -40,6 +42,7 @@ class CradentialsForm extends Component
 
     public function makeIntegration()
     {
+        TenantService::setConnection(Auth::user()->tenant);
         $this->validate([
             'pbxUrl' => 'required|url',
             'clientId' => 'required|string|max:255',
@@ -57,7 +60,7 @@ class CradentialsForm extends Component
         $isUpdate = $this->cradentials !== null;
         $previousData = $isUpdate ? $this->cradentials->toArray() : null;
 
-        $integration = ApiIntegration::updateOrCreate(
+        $integration = ApiIntegration::on('tenant')->updateOrCreate(
             ['tenant_id' => $this->tenant],
             $data
         );
@@ -67,8 +70,8 @@ class CradentialsForm extends Component
             logType: $isUpdate ? 'info' : 'success',
             action: $isUpdate ? 'update' : 'create',
             model: $integration,
-            description: $isUpdate 
-                ? 'API Integration credentials updated' 
+            description: $isUpdate
+                ? 'API Integration credentials updated'
                 : 'API Integration credentials created',
             previousData: $previousData,
             newData: array_merge($data, ['tenant_id' => $this->tenant])

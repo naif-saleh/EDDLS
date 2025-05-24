@@ -4,6 +4,7 @@ namespace App\Jobs\FileUploading;
 
 use App\Models\Contact;
 use App\Models\Campaign;
+use App\Services\TenantService;
 use League\Csv\Reader;
 use Illuminate\Bus\Queueable;
 use Illuminate\Bus\Batch;
@@ -22,6 +23,7 @@ class ProcessCsvContactsBatch implements ShouldQueue
 
     protected $filePath;
     protected $campaignId;
+    protected $tenant;
 
     /**
      * Create a new job instance.
@@ -30,10 +32,11 @@ class ProcessCsvContactsBatch implements ShouldQueue
      * @param int $campaignId
      * @return void
      */
-    public function __construct(string $filePath, int $campaignId)
+    public function __construct(string $filePath, int $campaignId, $tenant)
     {
         $this->filePath = $filePath;
         $this->campaignId = $campaignId;
+        $this->tenant = $tenant;
     }
 
     /**
@@ -53,7 +56,7 @@ class ProcessCsvContactsBatch implements ShouldQueue
 
             // Read the CSV
             $csv = Reader::createFromPath($fullPath, 'r');
-            $csv->setHeaderOffset(0); // Set to null if no header row
+            // $csv->setHeaderOffset(0); // Set to null if no header row
 
             // Count total records for progress tracking
             $totalRecords = count($csv);
@@ -103,6 +106,7 @@ class ProcessCsvContactsBatch implements ShouldQueue
                 $this->insertContacts($batch);
             }
 
+            TenantService::setConnection($this->tenant);
             // Update campaign status to complete
             $campaign = Campaign::find($this->campaignId);
             if ($campaign) {
@@ -133,6 +137,7 @@ class ProcessCsvContactsBatch implements ShouldQueue
     protected function insertContacts(array $contacts)
     {
         try {
+            TenantService::setConnection($this->tenant);
             Contact::insert($contacts);
         } catch (\Exception $e) {
             Log::error('Error inserting contacts batch: ' . $e->getMessage(), [

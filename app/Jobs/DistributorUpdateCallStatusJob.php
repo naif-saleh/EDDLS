@@ -6,8 +6,10 @@ use App\Models\Agent;
 use App\Models\CallLog;
 use App\Models\Campaign;
 use App\Models\Contact;
+use App\Models\DistributorCallsReport;
 use App\Models\Provider;
 use App\Services\LicenseService;
+use App\Services\TenantService;
 use App\Services\ThreeCXIntegrationService;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
@@ -42,7 +44,7 @@ class DistributorUpdateCallStatusJob implements ShouldQueue
      * 
      * @var int
      */
-    protected $tenantId;
+    protected $tenant;
     
     /**
      * Call ID to update
@@ -68,15 +70,15 @@ class DistributorUpdateCallStatusJob implements ShouldQueue
     /**
      * Create a new job instance.
      *
-     * @param int $tenantId
+     * @param int $tenant
      * @param string $callId
      * @param string $callStatus
      * @param array $callsData
      * @return void
      */
-    public function __construct($tenantId, $callId, $callStatus, $callsData)
+    public function __construct($tenant, $callId, $callStatus, $callsData)
     {
-        $this->tenantId = $tenantId;
+        $this->tenant = $tenant;
         $this->callId = $callId;
         $this->callStatus = $callStatus;
         $this->callsData = $callsData;
@@ -90,11 +92,11 @@ class DistributorUpdateCallStatusJob implements ShouldQueue
     public function handle()
     {
         try {
-            $threeCxService = new ThreeCXIntegrationService($this->tenantId);
+            $threeCxService = new ThreeCXIntegrationService($this->tenant);
             $this->updateCallRecord();
         } catch (\Exception $e) {
             Log::error("Error in UpdateCallStatusJob: {$e->getMessage()}", [
-                'tenant_id' => $this->tenantId,
+                'tenant_id' => $this->tenant,
                 'call_id' => $this->callId,
                 'exception' => $e,
             ]);
@@ -114,7 +116,7 @@ class DistributorUpdateCallStatusJob implements ShouldQueue
     protected function updateCallRecord()
     {
         $talking_duration = null;
-        $dial_duration = null;
+        $dialing_duration = null;
         $currentDuration = null;
         
         // Find the specific call data in the array
@@ -132,40 +134,43 @@ class DistributorUpdateCallStatusJob implements ShouldQueue
             $serverNow = Carbon::parse($callData['ServerNow']);
             $currentDuration = $establishedAt->diff($serverNow)->format('%H:%I:%S');
             
+            TenantService::setConnection($this->tenant);
             // Retrieve existing record to preserve any existing durations
-            $existingRecord = CallLog::where('call_id', $this->callId)->first();
+            $existingRecord = DistributorCallsReport::on('tenant')->where('call_id', $this->callId)->first();
 
             if ($existingRecord) {
                 // Update durations based on current status
                 switch ($this->callStatus) {
                     case 'Talking':
                         $talking_duration = $currentDuration;
-                        $dial_duration = $existingRecord->dial_duration;
+                        $dialing_duration = $existingRecord->dialing_duration;
                         break;
                     case 'Routing':
-                        $dial_duration = $currentDuration;
+                        $dialing_duration = $currentDuration;
                         $talking_duration = $existingRecord->talking_duration;
                         break;
                     default:
                         $talking_duration = $existingRecord->talking_duration;
-                        $dial_duration = $existingRecord->dial_duration;
+                        $dialing_duration = $existingRecord->dialing_duration;
                 }
             }
         } else {
+            TenantService::setConnection($this->tenant);
             // If updating without call data, preserve existing durations
-            $existingRecord = CallLog::where('call_id', $this->callId)->first();
+            $existingRecord = DistributorCallsReport::on('tenant')->where('call_id', $this->callId)->first();
 
             if ($existingRecord) {
                 $talking_duration = $existingRecord->talking_duration ?? null;
-                $dial_duration = $existingRecord->dial_duration ?? null;
+                $dialing_duration = $existingRecord->dialing_duration ?? null;
             }
         }
 
-        return DB::transaction(function () use ($talking_duration, $dial_duration, $currentDuration) {
-            $report = CallLog::where('call_id', $this->callId)->update([
+        return DB::transaction(function () use ($talking_duration, $dialing_duration, $currentDuration) {
+            TenantService::setConnection($this->tenant);
+            $report = DistributorCallsReport::on('tenant')->where('call_id', $this->callId)->update([
                 'call_status' => $this->callStatus,
                 'talking_duration' => $talking_duration,
-                'dial_duration' => $dial_duration,
+                'dialing_duration' => $dialing_duration,
             ]);
 
             Contact::where('call_id', $this->callId)->update(['status' => $this->callStatus]);

@@ -4,20 +4,28 @@ namespace App\Livewire\Tenant;
 
 use App\Models\User;
 use App\Services\SystemLogService;
+use Illuminate\Support\Facades\Hash;
 use Livewire\Component;
 use Masmerise\Toaster\Toaster;
 
 class EmployeeEdit extends Component
 {
     protected $systemLogService;
-    public $employee;
+
+    public $employee = [];
+
     public $employeeName;
+
     public $employeeEmail;
+
+    public $employeePassword;
+
     public $employeeRole;
 
     protected $rules = [
         'employeeName' => 'required|string|min:3|max:255',
         'employeeEmail' => 'required|email',
+        'employeePassword' => 'required',
         'employeeRole' => 'required|in:tenant_admin,agent',
     ];
 
@@ -26,12 +34,16 @@ class EmployeeEdit extends Component
         $this->systemLogService = $systemLogService;
     }
 
-    public function mount(User $employee)
+    public function mount()
     {
-        $this->employee = $employee;
-        $this->employeeName = $employee->name;
-        $this->employeeEmail = $employee->email;
-        $this->employeeRole = $employee->role;
+        $this->employee = User::find(request()->route('employee_id'));
+        if (! $this->employee) {
+            Toaster::error('Employee not found');
+        }
+        $this->employeeName = $this->employee->name;
+        $this->employeeEmail = $this->employee->email;
+        $this->employeePassword = $this->employee->employeePassword;
+        $this->employeeRole = $this->employee->role;
 
         // Log component mount
         $this->systemLogService->log(
@@ -39,8 +51,8 @@ class EmployeeEdit extends Component
             action: 'view_employee_edit',
             description: 'User accessed employee edit form',
             metadata: [
-                'employee_id' => $employee->id,
-                'tenant_id' => auth()->user()->tenant->id
+                'employee_id' => $this->employee->id,
+                'tenant_id' => auth()->user()->tenant->id,
             ]
         );
     }
@@ -57,6 +69,7 @@ class EmployeeEdit extends Component
             $this->employee->update([
                 'name' => $this->employeeName,
                 'email' => $this->employeeEmail,
+                'password' => Hash::make($this->employeePassword),
                 'role' => $this->employeeRole,
             ]);
 
@@ -70,7 +83,7 @@ class EmployeeEdit extends Component
                         'name' => $this->employeeName !== $originalData['name'],
                         'email' => $this->employeeEmail !== $originalData['email'],
                         'role' => $this->employeeRole !== $originalData['role'],
-                    ]
+                    ],
                 ]
             );
 
@@ -87,8 +100,8 @@ class EmployeeEdit extends Component
                     'input' => [
                         'name' => $this->employeeName,
                         'email' => $this->employeeEmail,
-                        'role' => $this->employeeRole
-                    ]
+                        'role' => $this->employeeRole,
+                    ],
                 ]
             );
             throw $e;
@@ -101,10 +114,10 @@ class EmployeeEdit extends Component
                 metadata: [
                     'employee_id' => $this->employee->id,
                     'error' => $e->getMessage(),
-                    'stack_trace' => $e->getTraceAsString()
+                    'stack_trace' => $e->getTraceAsString(),
                 ]
             );
-            Toaster::error('Failed to update employee: ' . $e->getMessage());
+            Toaster::error('Failed to update employee: '.$e->getMessage());
         }
     }
 

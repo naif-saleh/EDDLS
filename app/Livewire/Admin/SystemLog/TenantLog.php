@@ -4,6 +4,7 @@ namespace App\Livewire\Admin\SystemLog;
 
 use App\Models\SystemLog;
 use App\Models\User;
+use App\Services\TenantService;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Masmerise\Toaster\Toaster;
@@ -83,7 +84,8 @@ class TenantLog extends Component
 
     public function loadFilterOptions()
     {
-        $query = SystemLog::query();
+        TenantService::setConnection(Auth::user()->tenant);
+        $query = SystemLog::on('tenant');
 
         // Apply tenant scope for non-super admins
         if (!Auth::user()->isSuperAdmin()) {
@@ -112,7 +114,8 @@ class TenantLog extends Component
 
         // Load available tenants for super admins
         if (Auth::user()->isSuperAdmin()) {
-            $this->availableTenants = \App\Models\Tenant::orderBy('name')->get();
+            TenantService::setConnection(Auth::user()->tenant);
+            $this->availableTenants = \App\Models\Tenant::on('tenant')->orderBy('name')->get();
         }
     }
 
@@ -266,7 +269,8 @@ class TenantLog extends Component
 
     public function render()
     {
-        $query = SystemLog::query();
+        TenantService::setConnection(Auth::user()->tenant);
+        $query = SystemLog::on('tenant');
 
         // Apply tenant scope for non-super admins
         if (!Auth::user()->isSuperAdmin()) {
@@ -326,6 +330,9 @@ class TenantLog extends Component
         } elseif ($this->tenantId) {
             $usersQuery->where('tenant_id', $this->tenantId);
         }
+        // if(!Auth::user()->isTenantAdmin()){
+        //     $usersQuery->where('id', Auth::user()->id)->get();
+        // }
         $users = $usersQuery->get();
 
         return view('livewire.admin.system-log.tenant-log', [

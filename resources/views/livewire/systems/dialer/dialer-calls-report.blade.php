@@ -78,10 +78,10 @@
                     <!-- Provider Filter -->
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-neutral-300">Provider</label>
-                        <select wire:model.live="provider_id" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
+                        <select wire:model.live="provider" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
                             <option value="">All Providers</option>
                             @foreach($providers as $provider)
-                                <option value="{{ $provider->id }}">{{ $provider->name }}</option>
+                                <option value="{{ $provider }}">{{ $provider }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -89,10 +89,10 @@
                     <!-- Campaign Filter -->
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-neutral-300">Campaign</label>
-                        <select wire:model.live="campaign_id" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
+                        <select wire:model.live="campaign" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
                             <option value="">All Campaigns</option>
                             @foreach($campaigns as $campaign)
-                                <option value="{{ $campaign->id }}">{{ $campaign->name }}</option>
+                                <option value="{{ $campaign }}">{{ $campaign }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -129,6 +129,7 @@
                 <table class="min-w-full divide-y divide-gray-200 dark:divide-neutral-700">
                     <thead class="bg-gray-50 dark:bg-neutral-800">
                         <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Date Time</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Provider</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Campaign</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Phone Number</th>
@@ -141,14 +142,17 @@
                     <tbody class="bg-white divide-y divide-gray-200 dark:bg-neutral-900 dark:divide-neutral-700">
                         @forelse($callLogs as $log)
                             <tr class="hover:bg-gray-50 dark:hover:bg-neutral-800">
-                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                                    {{ $log->provider->name ?? 'N/A' }}
-                                </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                                    {{ $log->campaign->name ?? 'N/A' }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ $log->created_at ?? 'N/A' }}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
-                                    {{ $log->contact->phone_number ?? 'N/A' }}
+                                    {{ $log->provider ?? 'N/A' }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ $log->campaign ?? 'N/A' }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ $log->phone_number ?? 'N/A' }}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm">
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
@@ -157,21 +161,21 @@
                                     </span>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
-                                    {{ $log->talking_duration }}
+                                    {{ $log->talking_duration ?? '00:00:00' }}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
-                                    {{ $log->dial_duration }}
+                                    {{ $log->dialing_duration ?? '00:00:00' }}
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ $log->created_at->format('H:i:s') }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ $log->call_at ? \Carbon\Carbon::parse($log->call_at)->format('H:i:s') : 'N/A' }}
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ $log->updated_at->format('H:i:s') }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ $log->updated_at ? \Carbon\Carbon::parse($log->updated_at)->format('H:i:s') : 'N/A' }}
                                 </td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="6" class="px-6 py-4 text-center text-gray-500 dark:text-neutral-400">
+                                <td colspan="8" class="px-6 py-4 text-center text-gray-500 dark:text-neutral-400">
                                     No call logs found
                                 </td>
                             </tr>

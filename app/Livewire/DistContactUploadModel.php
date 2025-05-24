@@ -21,7 +21,7 @@ class DistContactUploadModel extends Component
     public $totalContacts = 0;
     public $fileName;
     public $batchId;
-    public $tenantId = '';
+    public $tenant = '';
     public $pollingInterval = '';
 
     protected function getListeners()
@@ -39,7 +39,7 @@ class DistContactUploadModel extends Component
     public function mount()
     {
         $this->showModal = false;
-        $this->tenantId = auth()->user()->tenant_id;
+        $this->tenant = auth()->user()->tenant;
     }
 
     public function openModal()
@@ -96,7 +96,7 @@ class DistContactUploadModel extends Component
                 Cache::put("agent-csv-import-{$this->batchId}-total", $this->totalContacts, now()->addHours(1));
 
                 // Start job processing
-                DistProcessCsvContactFile::dispatch($fullPath, $this->batchId, $this->fileName, $this->tenantId);
+                DistProcessCsvContactFile::dispatch($fullPath, $this->batchId, $this->fileName, $this->tenant);
 
                 // Start polling for progress updates
                 $this->pollingInterval = 2000; // 2 seconds

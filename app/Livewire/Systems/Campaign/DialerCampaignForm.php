@@ -8,13 +8,16 @@ use Livewire\WithFileUploads;
 use App\Models\Campaign;
 use App\Models\Contact;
 use App\Models\Provider;
+use App\Models\Setting;
 use App\Models\Tenant;
 use App\Services\SystemLogService;
+use App\Services\TenantService;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use League\Csv\Reader;
+use Masmerise\Toaster\Toaster;
 
 class DialerCampaignForm extends Component
 {
@@ -40,6 +43,7 @@ class DialerCampaignForm extends Component
 
     public function mount(Provider $provider, Tenant $tenant)
     {
+        TenantService::setConnection($tenant);
         $this->provider = $provider;
         $this->tenant = $tenant;
     }
@@ -75,6 +79,11 @@ class DialerCampaignForm extends Component
 
     public function createCampaign()
     {
+        if ($this->provider->status === 'inactive') {
+            Toaster::error('Agent is inactive. Please activate the agent to proceed.');
+
+            return;
+        }
         $this->validate();
 
         try {
@@ -92,17 +101,25 @@ class DialerCampaignForm extends Component
             $csv->setHeaderOffset(0);
             $totalRecords = count($csv);
 
-            // Create the campaign
-            $campaign = Campaign::create([
-                'slug' => Str::slug($this->campaignName . '-' . now()->timestamp),
-                'name' => $this->campaignName,
-                'tenant_id' => auth()->user()->tenant_id,
+            $tenant_auto_call = Setting::where('tenant_id', $this->tenant->id)
+                ->first();
+                
+            $campaignData = [
+                'tenant_id' => $this->tenant->id,
                 'provider_id' => $this->provider->id,
+                'name' => $this->campaignName,
+                'slug' => Str::slug($this->campaignName.'-'.now()->timestamp),
                 'start_time' => $this->campaignStart,
                 'end_time' => $this->campaignEnd,
                 'campaign_type' => $this->campaignType,
-                'contact_count' => $totalRecords,
-            ]);
+            ];
+
+            // Set 'allow' only if auto_call is false
+            if ($tenant_auto_call && $tenant_auto_call->auto_call == false) {
+                $campaignData['allow'] = false;
+            }
+
+            $campaign = Campaign::create($campaignData);
 
             // Log campaign creation
             $this->getSystemLogService()->logCreate(
@@ -117,7 +134,7 @@ class DialerCampaignForm extends Component
             );
 
             // Dispatch a single job to process the CSV file
-            ProcessCsvContactsBatch::dispatch($path, $campaign->id);
+            ProcessCsvContactsBatch::dispatch($path, $campaign->id, $this->tenant);
 
             // Log CSV processing started
             $this->getSystemLogService()->log(

@@ -3,9 +3,7 @@
 namespace App\Livewire\Admin\Dashboard;
 
 use Livewire\Component;
-use App\Models\Agent;
-use App\Models\Provider;
-use App\Models\Campaign;
+ 
 use App\Models\License;
 use App\Models\Tenant;
 use Carbon\Carbon;
@@ -13,9 +11,7 @@ use Illuminate\Support\Facades\DB;
 
 class AdminStats extends Component
 {
-    public $agentCount;
-    public $providerCount;
-    public $campaignCount;
+    
     public $tenantCount;
     public $licenseStats;
     public $monthlyStats;
@@ -27,10 +23,7 @@ class AdminStats extends Component
 
     public function loadStats()
     {
-        // Count basic stats
-        $this->agentCount = Agent::count();
-        $this->providerCount = Provider::count();
-        $this->campaignCount = Campaign::count();
+        
         $this->tenantCount = Tenant::count();
 
         // Get license statistics
@@ -69,8 +62,7 @@ class AdminStats extends Component
 
             $stats[] = [
                 'month' => $month['month'],
-                'agents' => Agent::whereBetween('created_at', [$startOfMonth, $endOfMonth])->count(),
-                'campaigns' => Campaign::whereBetween('created_at', [$startOfMonth, $endOfMonth])->count(),
+                 
                 'tenants' => Tenant::whereBetween('created_at', [$startOfMonth, $endOfMonth])->count(),
             ];
         }
@@ -81,9 +73,7 @@ class AdminStats extends Component
     public function render()
     {
         return view('livewire.admin.dashboard.admin-stats', [
-            'agentCount' => $this->agentCount,
-            'providerCount' => $this->providerCount,
-            'campaignCount' => $this->campaignCount,
+             
             'tenantCount' => $this->tenantCount,
             'licenseStats' => $this->licenseStats,
             'monthlyStats' => $this->monthlyStats,

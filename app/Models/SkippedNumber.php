@@ -14,6 +14,8 @@ class SkippedNumber extends Model
      *
      * @var array
      */
+
+     protected $connection = 'tenant';
     protected $fillable = [
         'phone_number',
         'provider_id',

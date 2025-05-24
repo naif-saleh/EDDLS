@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -24,11 +25,18 @@ return new class extends Migration
             $table->text('metadata')->nullable()->comment('Additional contextual information');
             $table->string('ip_address')->nullable()->comment('IP address of the user');
             $table->string('user_agent')->nullable()->comment('User agent of the browser');
+            $table->foreignId('tenant_id')->nullable()->constrained()->onDelete('cascade');
             $table->timestamps();
 
             // Index for efficient searching
             $table->index(['created_at']);
         });
+
+        // Update existing logs with tenant_id from their associated users
+        DB::table('system_logs')
+            ->join('users', 'system_logs.user_id', '=', 'users.id')
+            ->whereNotNull('users.tenant_id')
+            ->update(['system_logs.tenant_id' => DB::raw('users.tenant_id')]);
     }
 
     /**

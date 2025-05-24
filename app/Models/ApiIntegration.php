@@ -6,7 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class ApiIntegration extends Model
 {
+    // protected $connection = 'tenant';
 
+    protected $connection = 'tenant';
     protected $fillable = [
         'pbx_url',
         'client_id',

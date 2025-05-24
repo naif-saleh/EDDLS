@@ -14,6 +14,7 @@ class Provider extends Model
 {
     use HasFactory, LogsActivity, TracksStatusChanges;
 
+    protected $connection = 'tenant';
     protected $fillable = [
         'slug',
         'name',

@@ -17,6 +17,7 @@ class Campaign extends Model
      *
      * @var array
      */
+    protected $connection = 'tenant';
     protected $fillable = [
         'slug',
         'name',

@@ -9,6 +9,7 @@ use Livewire\Component;
 use Livewire\Features\SupportFileUploads\WithFileUploads;
 use Masmerise\Toaster\Toaster;
 use App\Services\SystemLogService;
+use App\Services\TenantService;
 
 class TenantSettings extends Component
 {
@@ -74,11 +75,13 @@ class TenantSettings extends Component
 
     public function mount()
     {
-        // Get current tenant
         $tenant = Auth::user()->tenant;
+        
+        // Ensure tenant connection is properly set up
+        TenantService::setConnection($tenant);
 
-        // Load existing settings if available
-        $this->setting = Setting::where('tenant_id', $tenant->id)->first();
+        // Load existing settings - use consistent connection approach
+        $this->setting = Setting::on('tenant')->where('tenant_id', $tenant->id)->first();
 
         if ($this->setting) {
             $this->timeStart = $this->setting->start_time ? $this->setting->start_time->format('H:i') : null;
@@ -90,9 +93,13 @@ class TenantSettings extends Component
 
     public function storeSettings()
     {
+        $tenant = Auth::user()->tenant;
+        
+        // Set tenant connection before any database operations
+        TenantService::setConnection($tenant);
+        
         $this->validate();
 
-        $tenant = Auth::user()->tenant;
         $isUpdate = $this->setting !== null;
         
         // Prepare settings data
@@ -135,6 +142,8 @@ class TenantSettings extends Component
                 'auto_call' => $this->setting->auto_call,
             ];
 
+            // Force the model to use the tenant connection for update
+            $this->setting->setConnection('tenant');
             $this->setting->update($settings);
             
             // Log settings update with detailed changes
@@ -149,7 +158,9 @@ class TenantSettings extends Component
 
             Toaster::success('Tenant settings updated successfully!');
         } else {
-            $setting = Setting::create($settings);
+            // Create using tenant connection
+            $setting = Setting::on('tenant')->create($settings);
+            $this->setting = $setting;
             
             // Log settings creation with initial values
             $this->systemLog->log(
@@ -166,8 +177,8 @@ class TenantSettings extends Component
             Toaster::success('Tenant settings created successfully!');
         }
 
-        // Refresh data
-        $this->setting = Setting::where('tenant_id', $tenant->id)->first();
+        // Refresh data using tenant connection
+        $this->setting = Setting::on('tenant')->where('tenant_id', $tenant->id)->first();
     }
 
     public function render()

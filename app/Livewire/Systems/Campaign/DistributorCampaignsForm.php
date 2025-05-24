@@ -2,20 +2,22 @@
 
 namespace App\Livewire\Systems\Campaign;
 
-use Livewire\Component;
 use App\Jobs\FileUploading\ProcessCsvContactsBatch;
 use App\Models\Agent;
-use Livewire\WithFileUploads;
 use App\Models\Campaign;
 use App\Models\Contact;
 use App\Models\Provider;
+use App\Models\Setting;
 use App\Models\Tenant;
 use App\Services\SystemLogService;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use League\Csv\Reader;
+use Livewire\Component;
+use Livewire\WithFileUploads;
+use Masmerise\Toaster\Toaster;
 
 class DistributorCampaignsForm extends Component
 {
@@ -23,21 +25,32 @@ class DistributorCampaignsForm extends Component
 
     // Form fields
     public $campaignName;
+
     public $campaignStart;
+
     public $campaignEnd;
+
     public $campaignType = 'distributor'; // Default value
+
     public $csvFile;
 
     // Upload state
     public $batchId;
+
     public $isProcessing = false;
+
     public $progress = 0;
+
     public $totalBatches = 0;
+
     public $processedBatches = 0;
+
     public $totalContacts = 0;
 
     public $provider = '';
+
     public $tenant = '';
+
     public $agent = '';
 
     protected function getSystemLogService(): SystemLogService
@@ -69,14 +82,25 @@ class DistributorCampaignsForm extends Component
     }
 
     public $currentCampaignId = null;
+
     public $pollingInterval = null;
 
     public function createDistCampaign()
     {
+        if ($this->provider->status === 'inactive') {
+            Toaster::error('Agent is inactive. Please activate the agent to proceed.');
+
+            return;
+        }
+         if ($this->agent->status === 'inactive') {
+            Toaster::error('Agent is inactive. Please activate the agent to proceed.');
+
+            return;
+        }
         $this->validate();
 
         try {
-            if (!$this->csvFile) {
+            if (! $this->csvFile) {
                 throw new \Exception('No CSV file uploaded');
             }
 
@@ -89,18 +113,26 @@ class DistributorCampaignsForm extends Component
             $csv->setHeaderOffset(0);
             $totalRecords = count($csv);
 
-            // Create the campaign
-            $campaign = Campaign::create([
-                'slug' => Str::slug($this->campaignName . '-' . now()->timestamp),
-                'name' => $this->campaignName,
-                'tenant_id' => auth()->user()->tenant_id,
+            $tenant_auto_call = Setting::where('tenant_id', $this->tenant->id)
+                ->first();
+
+            $campaignData = [
+                'tenant_id' => $this->tenant->id,
                 'provider_id' => $this->provider->id,
                 'agent_id' => $this->agent->id,
+                'name' => $this->campaignName,
+                'slug' => Str::slug($this->campaignName.'-'.now()->timestamp),
                 'start_time' => $this->campaignStart,
                 'end_time' => $this->campaignEnd,
                 'campaign_type' => $this->campaignType,
-                'contact_count' => $totalRecords,
-            ]);
+            ];
+
+            // Set 'allow' only if auto_call is false
+            if ($tenant_auto_call && $tenant_auto_call->auto_call == false) {
+                $campaignData['allow'] = false;
+            }
+
+            $campaign = Campaign::create($campaignData);
 
             // Log campaign creation
             $this->getSystemLogService()->logCreate(
@@ -116,7 +148,7 @@ class DistributorCampaignsForm extends Component
             );
 
             // Dispatch a single job to process the CSV file
-            ProcessCsvContactsBatch::dispatch($path, $campaign->id);
+            ProcessCsvContactsBatch::dispatch($path, $campaign->id, $this->tenant);
 
             // Log CSV processing started
             $this->getSystemLogService()->log(
@@ -127,7 +159,7 @@ class DistributorCampaignsForm extends Component
                 metadata: [
                     'file_path' => $path,
                     'total_records' => $totalRecords,
-                    'agent_id' => $this->agent->id
+                    'agent_id' => $this->agent->id,
                 ]
             );
 
@@ -159,7 +191,7 @@ class DistributorCampaignsForm extends Component
                 ]
             );
 
-            session()->flash('error', 'Error creating campaign: ' . $e->getMessage());
+            session()->flash('error', 'Error creating campaign: '.$e->getMessage());
         }
     }
 
@@ -171,15 +203,16 @@ class DistributorCampaignsForm extends Component
 
     public function checkProgress()
     {
-        if (!$this->currentCampaignId) {
+        if (! $this->currentCampaignId) {
             return;
         }
 
         try {
             $campaign = Campaign::find($this->currentCampaignId);
 
-            if (!$campaign) {
+            if (! $campaign) {
                 $this->stopProgressPolling();
+
                 return;
             }
 
@@ -220,7 +253,7 @@ class DistributorCampaignsForm extends Component
                         metadata: [
                             'total_processed' => $processedCount,
                             'expected_count' => $expectedCount,
-                            'agent_id' => $this->agent->id
+                            'agent_id' => $this->agent->id,
                         ]
                     );
                 }
@@ -239,7 +272,7 @@ class DistributorCampaignsForm extends Component
                 ]
             );
 
-            Log::error('Error checking progress: ' . $e->getMessage());
+            Log::error('Error checking progress: '.$e->getMessage());
         }
     }
 
@@ -268,7 +301,7 @@ class DistributorCampaignsForm extends Component
             if ($batch) {
                 $this->processedBatches = $batch->processedJobs();
                 $this->progress = $batch->progress();
-                $this->isProcessing = !$batch->finished();
+                $this->isProcessing = ! $batch->finished();
             }
         }
     }
@@ -279,6 +312,7 @@ class DistributorCampaignsForm extends Component
         if ($this->isProcessing && $this->currentCampaignId) {
             $this->checkProgress();
         }
+
         return view('livewire.systems.campaign.distributor-campaigns-form');
     }
 }

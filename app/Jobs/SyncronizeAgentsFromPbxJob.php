@@ -66,7 +66,7 @@ class SyncronizeAgentsFromPbxJob implements ShouldQueue
 
         if ($users && isset($users['value']) && is_array($users['value'])) {
             // Use a persistent database connection to avoid reconnection overhead
-            $connection = DB::connection();
+            $connection = DB::connection('tenant');
             $pdo = $connection->getPdo();
 
             // Check if connection is still alive
@@ -84,7 +84,7 @@ class SyncronizeAgentsFromPbxJob implements ShouldQueue
                     'profile' => $user['CurrentProfileName'] ?? 'Unknown Profile'
                 ]);
 
-                Agent::updateOrCreate(
+                Agent::on('tenant')->updateOrCreate(
                     [
                         'three_cx_user_id' => $user['Id'],
                         'tenant_id' => $this->tenant_id,

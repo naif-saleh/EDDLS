@@ -3,6 +3,7 @@
 namespace App\Livewire\Users;
 
 use App\Models\User;
+use App\Services\TenantService;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -70,7 +71,8 @@ class UserList extends Component
             return redirect()->route('admin.user.list');
         }
 
-        User::create([
+        TenantService::setConnection($this->tenant);
+        User::on('tenant')->create([
             'name' => $this->userName,
             'email' => $this->userEmail,
             'password' => Hash::make($this->userPassword),
@@ -140,7 +142,10 @@ class UserList extends Component
     public function changeUserRole($userId, $role)
     {
         $user = User::find($userId);
-        $user->update(['role' => $role]);
+        $user->update([
+            'role' => $role,
+            'status' => 1
+        ]);
         Toaster::success('User Role Changed to '.$role);
     }
 

@@ -1,4 +1,3 @@
-<?php ?>
 <div class="py-6">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <!-- Header with Export Button -->
@@ -148,7 +147,7 @@
                         <select wire:model.live="selectedCampaign" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
                             <option value="">All Campaigns</option>
                             @foreach($campaigns as $campaign)
-                                <option value="{{ $campaign->id }}">{{ $campaign->name }}</option>
+                                <option value="{{ $campaign }}">{{ $campaign }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -159,7 +158,7 @@
                         <select wire:model.live="selectedAgent" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
                             <option value="">All Agents</option>
                             @foreach($agents as $agent)
-                                <option value="{{ $agent->id }}">{{ $agent->name }}</option>
+                                <option value="{{ $agent }}">{{ $agent }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -170,7 +169,18 @@
                         <select wire:model.live="selectedProvider" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
                             <option value="">All Providers</option>
                             @foreach($providers as $provider)
-                                <option value="{{ $provider->id }}">{{ $provider->name }}</option>
+                                <option value="{{ $provider }}">{{ $provider }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                     <!-- Status Filter -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-neutral-300">Call Status</label>
+                        <select wire:model.live="status" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
+                            <option value="">All Statuses</option>
+                            @foreach($statuses as $key => $value)
+                                <option value="{{ $key }}">{{ $value }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -178,13 +188,13 @@
                     <!-- Start Date -->
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-neutral-300">Start Date</label>
-                        <input type="datetime-local" wire:model.live="startDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
+                        <input type="date" wire:model.live="startDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
                     </div>
 
                     <!-- End Date -->
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-neutral-300">End Date</label>
-                        <input type="datetime-local" wire:model.live="endDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
+                        <input type="date" wire:model.live="endDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-neutral-800 dark:border-neutral-600 dark:text-white">
                     </div>
                 </div>
             </div>
@@ -196,65 +206,65 @@
                 <table class="min-w-full divide-y divide-gray-200 dark:divide-neutral-700">
                     <thead class="bg-gray-50 dark:bg-neutral-800">
                         <tr>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider cursor-pointer" wire:click="sortBy('created_at')">
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider cursor-pointer" wire:click="sortBy('date_time')">
                                 Date/Time
-                                @if($sortField === 'created_at')
+                                @if($sortField === 'date_time')
                                     <span class="ml-1">{{ $sortDirection === 'asc' ? '↑' : '↓' }}</span>
                                 @endif
                             </th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Campaign</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Agent</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Provider</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Phone Number</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Mobile</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Status</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Dial Duration</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Talking Duration</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Call At</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">End At</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Dialing</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Talking</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Called</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Ended</th>
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200 dark:bg-neutral-900 dark:divide-neutral-700">
                         @forelse($calls as $call)
                             <tr class="hover:bg-gray-50 dark:hover:bg-neutral-800">
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ $call->created_at->format('Y-m-d H:i:s') }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ \Carbon\Carbon::parse($call->date_time)->format('Y-m-d H:i:s') }}
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ $call->campaign->name ?? 'N/A' }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ $call->campaign ?? 'N/A' }}
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ $call->agent->name ?? 'N/A' }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ $call->agent ?? 'N/A' }}
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ $call->provider->name ?? 'N/A' }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ $call->provider ?? 'N/A' }}
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ $call->contact->phone_number ?? 'N/A' }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ $call->phone_number ?? 'N/A' }}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                        {{ $call->call_status === 'Talking' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 
-                                           ($call->call_status === 'Initiating' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' : 
-                                           'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300') }}">
-                                        {{ $call->call_status === 'Initiating' ? 'AgentUnanswered' : $call->call_status }}
+                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                                        {{ $call->call_status === 'Talking' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' :
+                                           ($call->call_status === 'Initiating' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300' :
+                                           'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300') }}">
+                                        {{ $reportService->getCallStatus($call->call_status) }}
                                     </span>
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
                                     {{ $call->dial_duration ?? '00:00:00' }}
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
                                     {{ $call->talking_duration ?? '00:00:00' }}
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ $call->created_at->format('H:i:s') }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ \Carbon\Carbon::parse($call->date_time)->format('H:i:s') }}
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ $call->updated_at->format('H:i:s') }}
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-neutral-400">
+                                    {{ \Carbon\Carbon::parse($call->end_time)->format('H:i:s') ?? 'N/A' }}
                                 </td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="8" class="px-6 py-4 text-center text-gray-500 dark:text-neutral-400">
+                                <td colspan="10" class="px-6 py-4 text-center text-gray-500 dark:text-neutral-400">
                                     No calls found
                                 </td>
                             </tr>

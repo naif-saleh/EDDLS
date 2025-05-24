@@ -5,6 +5,8 @@ namespace App\Livewire\Systems\SkippedNumbers;
 use App\Models\Provider;
 use App\Models\SkippedNumber;
 use App\Services\SystemLogService;
+use App\Services\TenantService;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Response;
 use Livewire\Component;
@@ -101,6 +103,7 @@ class DialerSkippedNumbers extends Component
                     ]
                 ]
             );
+            TenantService::setConnection(Auth::user()->tenant);
 
             $query = $this->buildBaseQuery()
                 ->with(['provider', 'campaign'])
@@ -192,6 +195,7 @@ class DialerSkippedNumbers extends Component
      */
     protected function buildBaseQuery()
     {
+        TenantService::setConnection(Auth::user()->tenant);
         return SkippedNumber::where('tenant_id', $this->tenant->id)
             ->whereNull('agent_id')  // Ensure we only get dialer skipped numbers
             ->when($this->selectedProvider, function ($query) {
@@ -208,6 +212,7 @@ class DialerSkippedNumbers extends Component
 
     public function render()
     {
+        TenantService::setConnection(Auth::user()->tenant);
         // Get providers with skipped number counts
         $providers = Provider::where('tenant_id', $this->tenant->id)
             ->whereHas('skippedNumbers', function($query) {
@@ -232,6 +237,7 @@ class DialerSkippedNumbers extends Component
         $query = $this->buildBaseQuery();
         $skippedNumbers = $query->paginate($this->perPage);
 
+        TenantService::setConnection(Auth::user()->tenant);
         // Get total for all providers
         $totalSkipped = SkippedNumber::where('tenant_id', $this->tenant->id)
             ->whereNull('agent_id')

@@ -5,10 +5,11 @@ namespace App\Livewire\Systems\Distributor;
 use App\Jobs\SyncronizeAgentsFromPbxJob;
 use App\Models\Agent;
 use App\Models\License;
-use App\Models\Tenant;
 use App\Services\LicenseService;
+use App\Services\TenantService;
 use App\Services\ThreeCXIntegrationService;
 use App\Services\ThreeCxTokenService;
+use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Masmerise\Toaster\Toaster;
@@ -17,70 +18,54 @@ class AgentList extends Component
 {
     use WithPagination;
 
-    public $isActive = false;
-
     public $search = '';
-
     public $sortField = 'created_at';
-
     public $sortDirection = 'desc';
-
     public $perPage = 10;
-
     public $editMode = false;
-
     public $editingProviderId = null;
-
     public $confirmingDeleteId = null;
 
-    private $threeCxToken = '';
+    public $tenant_id;
+    public $tenant;
+    public $license;
 
     public $tokenValue;
-
-    private $three_cxintegration_service = '';
-
     public $three_cxintegration_service_value;
 
-    public $tenant_id;
-
-    public $licenseSevice;
-
-    public function mount()
+    public function mount($tenant = null)
     {
+        if (!$tenant) {
+            $tenant = request()->route('tenant');
+        }
+
+        $this->tenant = $tenant;
         $this->tenant_id = auth()->user()->tenant_id;
-        // dd($this->tenant_id);
-        // Initialize services with the tenant ID
-        $threeCxToken = new ThreeCxTokenService($this->tenant_id);
-        $three_cxintegration_service = new ThreeCXIntegrationService($this->tenant_id, $threeCxToken);
 
-        // Get token and users data for the tenant
-        $this->tokenValue = $threeCxToken->getToken();
-        $this->three_cxintegration_service_value = $three_cxintegration_service->getUsersFromThreeCxApi();
+        if ($tenant) {
+            $this->license = DB::connection('mysql')
+                ->table('licenses')
+                ->where('tenant_id', $tenant->id)
+                ->first();
+        }
 
+        $tokenService = new ThreeCxTokenService($this->tenant_id);
+        $integrationService = new ThreeCXIntegrationService($this->tenant_id, $tokenService);
+
+        $this->tokenValue = $tokenService->getToken();
+        $this->three_cxintegration_service_value = $integrationService->getUsersFromThreeCxApi();
     }
 
-    protected function getLicenseService()
+    protected function getLicenseService(): LicenseService
     {
         return new LicenseService;
     }
 
-    // Syncronize Agents From 3CX PBX
-    public function syincAgents()
-    {
-
-        // Make sure the parameters are in correct order
-        SyncronizeAgentsFromPbxJob::dispatch($this->tenant_id, $this->three_cxintegration_service_value);
-
-        Toaster::success('Agents Synchronization Started');
-    }
-
-    // Update page while search
     public function updatingSearch()
     {
         $this->resetPage();
     }
 
-    // make Sorting
     public function sortBy($field)
     {
         if ($this->sortField === $field) {
@@ -91,32 +76,41 @@ class AgentList extends Component
         }
     }
 
-    // Toggle to activate or disactivate agent
+    public function syincAgents()
+    {
+        TenantService::setConnection(auth()->user()->tenant);
+
+        SyncronizeAgentsFromPbxJob::dispatch($this->tenant_id, $this->three_cxintegration_service_value);
+
+        Toaster::success('Agents synchronization started.');
+    }
+
     public function toggleAgentStatus($id, $isChecked)
     {
-        $agent = Agent::find($id);
+        TenantService::setConnection(auth()->user()->tenant);
+
+        $agent = Agent::on('tenant')->find($id);
 
         if (! $agent) {
             Toaster::error('Agent not found.');
-
             return;
         }
 
         $licenseService = $this->getLicenseService();
 
         if ($isChecked) {
-            // Activating agent: check license limit before activating
             if (! $licenseService->validAgentsCount($this->tenant_id)) {
-                Toaster::warning('License Agents limit reached. Please contact support.');
+                Toaster::warning('License agent limit reached. Please contact support.');
                 $this->dispatch('revertCheckbox', agentId: $id, currentStatus: $agent->status === 'active');
-
-                return;
+                return redirect()->route('tenant.distributor.agents', ['tenant' => $this->tenant_id]);
             }
+
             $agent->update(['status' => 'active']);
+            return redirect()->route('tenant.distributor.agents', ['tenant' => $this->tenant_id]);
         } else {
-            // Deactivating agent: decrement count
             $licenseService->incrementAgentsCount($this->tenant_id);
             $agent->update(['status' => 'inactive']);
+            return redirect()->route('tenant.distributor.agents', ['tenant' => $this->tenant_id]);
         }
 
         Toaster::success('Agent status updated successfully.');
@@ -124,29 +118,24 @@ class AgentList extends Component
 
     public function render()
     {
-        $query = Agent::query();
+        TenantService::setConnection(auth()->user()->tenant);
 
-        // Always filter by tenant_id first
-        $query->where('tenant_id', $this->tenant_id);
+        $query = Agent::on('tenant')->where('tenant_id', $this->tenant_id);
 
-        // Group the search conditions
         if ($this->search) {
             $query->where(function ($q) {
-                $q->where('name', 'like', '%'.$this->search.'%')
-                    ->orWhere('extension', 'like', '%'.$this->search.'%')
-                    ->orWhere('status', 'like', '%'.$this->search.'%');
+                $q->where('name', 'like', '%' . $this->search . '%')
+                    ->orWhere('extension', 'like', '%' . $this->search . '%')
+                    ->orWhere('status', 'like', '%' . $this->search . '%');
             });
         }
 
-        // Apply sorting
-        $query->orderBy($this->sortField, $this->sortDirection);
-
-        $agents = $query->paginate($this->perPage);
-        $license = License::where('tenant_id', $this->tenant_id)->first();
+        $agents = $query->orderBy($this->sortField, $this->sortDirection)
+            ->paginate($this->perPage);
 
         return view('livewire.systems.distributor.agent-list', [
             'agents' => $agents,
-            'license' => $license,
+            // 'license' => $this->license, // Uncomment if used in the view
         ]);
     }
 }

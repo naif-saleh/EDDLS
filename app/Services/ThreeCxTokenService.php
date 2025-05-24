@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Models\ApiIntegration;
+use App\Models\Tenant;
 
 /**
  * Class ThreeCxTokenService
@@ -20,10 +21,26 @@ class ThreeCxTokenService
     protected $clientId;
     protected $clientSecret;
     protected $tenantId;
+    protected $tenant;
 
-    public function __construct($tenantId = null)
+    public function __construct($tenant = null)
     {
-        $this->tenantId = $tenantId ?? auth()->user()->tenant_id;
+        // Handle both tenant object and tenant ID
+        if ($tenant instanceof Tenant) {
+            $this->tenant = $tenant;
+            $this->tenantId = $tenant->id;
+        } elseif (is_numeric($tenant)) {
+            $this->tenantId = $tenant;
+            $this->tenant = Tenant::find($tenant);
+        } else {
+            $this->tenantId = auth()->user()->tenant_id ?? null;
+            $this->tenant = $this->tenantId ? Tenant::find($this->tenantId) : null;
+        }
+
+        if (!$this->tenant) {
+            throw new \Exception('No valid tenant found for ThreeCxTokenService');
+        }
+
         $this->loadCredentials();
     }
 
@@ -32,7 +49,13 @@ class ThreeCxTokenService
      */
     protected function loadCredentials()
     {
-        $integration = ApiIntegration::where('tenant_id', $this->tenantId)->first();
+        if (!$this->tenant) {
+            Log::error('❌ No tenant found for loading credentials');
+            return;
+        }
+
+        TenantService::setConnection($this->tenant);
+        $integration = ApiIntegration::on('tenant')->where('tenant_id', $this->tenantId)->first();
 
         if (!$integration) {
             Log::error('❌ No API integration found for tenant ID: ' . $this->tenantId);

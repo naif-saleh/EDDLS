@@ -4,11 +4,10 @@ namespace App\Livewire\Systems\Dialer;
 
 use Livewire\Component;
 use Livewire\WithPagination;
-use App\Models\Provider;
-use App\Models\Campaign;
 use App\Services\DialerReportService;
 use App\Services\SystemLogService;
 use App\Exports\Excel\CallLogsExport;
+use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Support\Str;
 
@@ -17,8 +16,8 @@ class DialerCallsReport extends Component
     use WithPagination;
 
     public $search = '';
-    public $provider_id = '';
-    public $campaign_id = '';
+    public $provider = '';
+    public $campaign = '';
     public $status = '';
     public $date_from = '';
     public $date_to = '';
@@ -30,8 +29,8 @@ class DialerCallsReport extends Component
 
     protected $queryString = [
         'search' => ['except' => ''],
-        'provider_id' => ['except' => ''],
-        'campaign_id' => ['except' => ''],
+        'provider' => ['except' => ''],
+        'campaign' => ['except' => ''],
         'status' => ['except' => ''],
         'date_from' => ['except' => ''],
         'date_to' => ['except' => '']
@@ -52,6 +51,31 @@ class DialerCallsReport extends Component
         );
     }
 
+    public function updatingProvider()
+    {
+        $this->resetPage();
+    }
+
+    public function updatingCampaign()
+    {
+        $this->resetPage();
+    }
+
+    public function updatingStatus()
+    {
+        $this->resetPage();
+    }
+
+    public function updatingDateFrom()
+    {
+        $this->resetPage();
+    }
+
+    public function updatingDateTo()
+    {
+        $this->resetPage();
+    }
+
     public function getCallStatuses()
     {
         return [
@@ -64,8 +88,8 @@ class DialerCallsReport extends Component
     {
         $this->reset([
             'search',
-            'provider_id',
-            'campaign_id',
+            'provider',
+            'campaign',
             'status',
             'date_from',
             'date_to'
@@ -83,8 +107,8 @@ class DialerCallsReport extends Component
     {
         $filters = [
             'search' => $this->search,
-            'provider_id' => $this->provider_id,
-            'campaign_id' => $this->campaign_id,
+            'provider' => $this->provider,
+            'campaign' => $this->campaign,
             'status' => $this->status,
             'date_from' => $this->date_from,
             'date_to' => $this->date_to,
@@ -102,15 +126,16 @@ class DialerCallsReport extends Component
         );
 
         $filename = 'call-logs-' . Str::random(8) . '.xlsx';
-        return Excel::download(new CallLogsExport($filters), $filename);
+        $tenant = Auth::user()->tenant;
+        return Excel::download(new CallLogsExport($filters, $tenant), $filename);
     }
 
     public function render(DialerReportService $reportService)
     {
         $filters = [
             'search' => $this->search,
-            'provider_id' => $this->provider_id,
-            'campaign_id' => $this->campaign_id,
+            'provider' => $this->provider,
+            'campaign' => $this->campaign,
             'status' => $this->status,
             'date_from' => $this->date_from,
             'date_to' => $this->date_to,
@@ -127,9 +152,9 @@ class DialerCallsReport extends Component
                 metadata: [
                     'filters' => $filters,
                     'statistics' => [
-                        'total_calls' => $statistics['total_calls'] ?? 0,
-                        'answered_calls' => $statistics['answered_calls'] ?? 0,
-                        'unanswered_calls' => $statistics['unanswered_calls'] ?? 0
+                        'total_calls' => $statistics['total']['count'] ?? 0,
+                        'answered_calls' => $statistics['answered']['count'] ?? 0,
+                        'unanswered_calls' => $statistics['unanswered']['count'] ?? 0
                     ]
                 ]
             );
@@ -137,8 +162,8 @@ class DialerCallsReport extends Component
         
         return view('livewire.systems.dialer.dialer-calls-report', [
             'callLogs' => $reportService->getFilteredCallLogs($filters),
-            'providers' => Provider::where('tenant_id', auth()->user()->tenant_id)->get(),
-            'campaigns' => Campaign::where('tenant_id', auth()->user()->tenant_id)->get(),
+            'providers' => $reportService->getProviders(),
+            'campaigns' => $reportService->getCampaigns(),
             'statuses' => $this->getCallStatuses(),
             'reportService' => $reportService,
             'statistics' => $statistics

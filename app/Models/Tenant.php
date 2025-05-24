@@ -30,6 +30,12 @@ class Tenant extends Model
         'database_password',
     ];
 
+
+    public function getDatabaseNameAttribute()
+{
+    return $this->db_name ?? "tenant_{$this->id}_database";
+}
+
     /**
      * Get the users associated with the tenant
      */

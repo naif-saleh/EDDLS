@@ -17,6 +17,8 @@ class Contact extends Model
      * @var array
      */
 
+    protected $connection = 'tenant';
+    
     protected $fillable = [
         'slug',
         'campaign_id',

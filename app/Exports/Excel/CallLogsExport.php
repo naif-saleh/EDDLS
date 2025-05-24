@@ -2,30 +2,41 @@
 
 namespace App\Exports\Excel;
 
-use App\Models\CallLog;
+use App\Models\DialerCallsReport;
+use App\Services\TenantService;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use Carbon\Carbon;
 
 class CallLogsExport implements FromCollection, WithHeadings, WithMapping, ShouldAutoSize, WithStyles
 {
     protected $filters;
+    protected $tenant;
 
-    public function __construct($filters = [])
+    public function __construct($filters = [], $tenant = null)
     {
         $this->filters = $filters;
+        $this->tenant = $tenant;
     }
+     
 
     public function collection()
     {
-        $query = CallLog::with(['provider', 'contact', 'campaign', 'agent'])
-            ->select('call_logs.*');
+        TenantService::setConnection($this->tenant);
+        $query = DialerCallsReport::on('tenant')
+            ->where('tenant_id', auth()->user()->tenant_id)
+            ->select('dialer_calls_reports.*');
 
-        if (!empty($this->filters['provider_id'])) {
-            $query->where('provider_id', $this->filters['provider_id']);
+        if (!empty($this->filters['provider'])) {
+            $query->where('provider', 'like', "%{$this->filters['provider']}%");
+        }
+
+        if (!empty($this->filters['campaign'])) {
+            $query->where('campaign', 'like', "%{$this->filters['campaign']}%");
         }
 
         if (!empty($this->filters['status'])) {
@@ -33,26 +44,24 @@ class CallLogsExport implements FromCollection, WithHeadings, WithMapping, Shoul
         }
 
         if (!empty($this->filters['date_from'])) {
-            $query->whereDate('created_at', '>=', $this->filters['date_from']);
+            $query->whereDate('date_time', '>=', $this->filters['date_from']);
         }
 
         if (!empty($this->filters['date_to'])) {
-            $query->whereDate('created_at', '<=', $this->filters['date_to']);
+            $query->whereDate('date_time', '<=', $this->filters['date_to']);
         }
 
         if (!empty($this->filters['search'])) {
             $search = $this->filters['search'];
             $query->where(function ($q) use ($search) {
-                $q->whereHas('contact', function ($q) use ($search) {
-                    $q->where('phone_number', 'like', "%{$search}%");
-                })
-                ->orWhereHas('provider', function ($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%");
-                });
+                $q->where('phone_number', 'like', "%{$search}%")
+                  ->orWhere('provider', 'like', "%{$search}%")
+                  ->orWhere('campaign', 'like', "%{$search}%")
+                  ->orWhere('call_id', 'like', "%{$search}%");
             });
         }
 
-        return $query->latest()->get();
+        return $query->latest('date_time')->get();
     }
 
     public function headings(): array
@@ -61,33 +70,27 @@ class CallLogsExport implements FromCollection, WithHeadings, WithMapping, Shoul
             'Call ID',
             'Provider',
             'Campaign',
-            'Agent',
             'Phone Number',
             'Call Status',
-            'Call Type',
-            'Talk Duration',
-            'Dial Duration',
-            'Start Time',
-            'End Time',
-            'Notes'
+            'Talking Duration',
+            'Dialing Duration',
+            'Call At',
+            'Date Time'
         ];
     }
 
     public function map($log): array
     {
         return [
-            $log->call_id,
-            $log->provider->name ?? 'N/A',
-            $log->campaign->name ?? 'N/A',
-            $log->agent->name ?? 'N/A',
-            $log->contact->phone_number ?? 'N/A',
-            $log->call_status,
-            $log->call_type,
-            $log->talking_duration,
-            $log->dial_duration,
-            $log->created_at->format('Y-m-d H:i:s'),
-            $log->updated_at->format('Y-m-d H:i:s'),
-            $log->notes
+            $log->call_id ?? 'N/A',
+            $log->provider ?? 'N/A',
+            $log->campaign ?? 'N/A',
+            $log->phone_number ?? 'N/A',
+            $this->getCallStatus($log->call_status),
+            $log->talking_duration ?? '00:00:00',
+            $log->dialing_duration ?? '00:00:00',
+            $log->call_at ? Carbon::parse($log->call_at)->format('Y-m-d H:i:s') : 'N/A',
+            $log->date_time ? Carbon::parse($log->date_time)->format('Y-m-d H:i:s') : 'N/A'
         ];
     }
 
@@ -103,4 +106,9 @@ class CallLogsExport implements FromCollection, WithHeadings, WithMapping, Shoul
             ]
         ];
     }
-} 
+
+    protected function getCallStatus($status)
+    {
+        return $status === 'Talking' ? 'Answered' : ($status === 'Routing' ? 'Unanswered' : $status);
+    }
+}

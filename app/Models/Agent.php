@@ -12,6 +12,7 @@ class Agent extends Model
 {
     use HasFactory, LogsActivity;
 
+    protected $connection = 'tenant';
     protected $fillable = [
         'slug',
         'name',

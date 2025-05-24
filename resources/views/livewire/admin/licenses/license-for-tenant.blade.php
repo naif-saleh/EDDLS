@@ -3,7 +3,7 @@
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
             <div>
                 <h2 class="text-xl font-semibold text-gray-800 dark:text-white">License Information</h2>
-                <p class="text-sm text-gray-500 dark:text-gray-400">{{ $license->tenant->name }}</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400">{{ auth()->user()->tenant->name }}</p>
             </div>
             {{-- <button wire:click="exportLicensePDF"
                 class="flex items-center gap-x-3 py-2 px-3 rounded-lg text-sm text-gray-800 hover:bg-gray-100 focus:outline-hidden focus:bg-gray-100 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-300 dark:focus:bg-neutral-700 dark:focus:text-neutral-300">

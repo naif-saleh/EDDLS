@@ -4,6 +4,10 @@ namespace App\Livewire\Systems\Distributor;
 
 use App\Models\Agent;
 use App\Models\Provider;
+use App\Services\TenantService;
+use Dotenv\Exception\ValidationException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
@@ -36,6 +40,12 @@ class ProvidersList extends Component
 
     public $confirmingDeleteId = null;
 
+    // public $agent;
+
+    // public function mount(Agent $agent){
+    //     TenantService::setConnection(auth()->user()->tenant);
+    //     $this->agent = $agent;
+    // }
     // Update page while search
     public function updatingSearch()
     {
@@ -56,28 +66,42 @@ class ProvidersList extends Component
     // Create New Provider
     public function createProvider()
     {
+        TenantService::setConnection(auth()->user()->tenant);
+       $originalConnection = DB::getDefaultConnection();
+
         try {
-            $validated = $this->validate([
+            TenantService::setConnection(auth()->user()->tenant);
+            DB::setDefaultConnection('tenant');
+
+            $validator = Validator::make([
+                'providerName' => $this->providerName,
+                'providerExtension' => $this->providerExtension,
+                'providerStatus' => $this->providerStatus,
+            ], [
                 'providerName' => [
                     'required', 'string', 'max:150',
-                    Rule::unique('providers', 'name')->where(function ($query) {
-                        return $query->where('tenant_id', auth()->user()->tenant->id);
-                    }),
+                    Rule::unique('providers', 'name')
+                        ->where(fn ($q) => $q->where('tenant_id', auth()->user()->tenant->id)),
                 ],
                 'providerExtension' => [
                     'required',
-                    Rule::unique('providers', 'extension')->where(function ($query) {
-                        return $query->where('tenant_id', auth()->user()->tenant->id);
-                    }),
+                    Rule::unique('providers', 'extension')
+                        ->where(fn ($q) => $q->where('tenant_id', auth()->user()->tenant->id)),
                 ],
                 'providerStatus' => 'required',
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            Toaster::error('Validation failed: '.implode(', ', $e->validator->errors()->all()));
 
-            return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
+            $validated = $validator->validate();
+
+        } catch (ValidationException $e) {
+            DB::setDefaultConnection($originalConnection);
+            Toaster::error('Validation failed: ' . implode(', ', $e->validator->errors()->all()));
+            return redirect()->route('tenant.distributor.providers', ['tenant' => auth()->user()->tenant->slug]);
         }
 
+        DB::setDefaultConnection($originalConnection);
+
+        TenantService::setConnection(auth()->user()->tenant);
         // Generate a base slug
         $baseSlug = Str::slug($this->providerName);
 
@@ -85,12 +109,12 @@ class ProvidersList extends Component
         $slug = $baseSlug;
         $count = 1;
 
-        while (Provider::where('slug', $slug)->exists()) {
+        while (Provider::on('tenant')->where('slug', $slug)->exists()) {
             $slug = $baseSlug.'-'.$count;
             $count++;
         }
 
-        Provider::create([
+        Provider::on('tenant')->create([
             'name' => $this->providerName,
             'extension' => $this->providerExtension,
             'tenant_id' => auth()->user()->tenant->id,
@@ -101,13 +125,14 @@ class ProvidersList extends Component
 
         Toaster::success('Provider is Created Successfully');
 
-        return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
+       return redirect()->route('tenant.dialer.providers', ['tenant' => auth()->user()->tenant->slug]);
     }
 
     // Edit Modal display
     public function openEditModal($providerId)
     {
-        $provider = Provider::find($providerId);
+        TenantService::setConnection(auth()->user()->tenant);
+        $provider = Provider::on('tenant')->find($providerId);
 
         if ($provider) {
             $this->editingProviderId = $provider->id;
@@ -123,13 +148,14 @@ class ProvidersList extends Component
     // Update Provider
     public function updateProvider()
     {
+        TenantService::setConnection(auth()->user()->tenant);
         $this->validate([
             'providerName' => 'required|string|max:150',
             'providerExtension' => 'required|string|max:10',
             'providerStatus' => 'required',
         ]);
 
-        $provider = Provider::find($this->editingProviderId);
+        $provider = Provider::on('tenant')->find($this->editingProviderId);
 
         if ($provider) {
             $provider->update([
@@ -154,7 +180,8 @@ class ProvidersList extends Component
     // Toggle to activate or disactivate Provider
     public function toggleProviderStatus($id, $isChecked)
     {
-        $provider = Provider::find($id);
+        TenantService::setConnection(auth()->user()->tenant);
+        $provider = Provider::on('tenant')->find($id);
 
         if (! $provider) {
             Toaster::error('Provider not found.');
@@ -176,7 +203,8 @@ class ProvidersList extends Component
 
     public function deleteTenant()
     {
-        $provider = Provider::find($this->confirmingDeleteId);
+        TenantService::setConnection(auth()->user()->tenant);
+        $provider = Provider::on('tenant')->find($this->confirmingDeleteId);
 
         if ($provider) {
             $provider->delete();
@@ -194,8 +222,9 @@ class ProvidersList extends Component
 
     public function render()
     {
+        TenantService::setConnection(auth()->user()->tenant);
         // Initialize provider query
-        $query = Provider::query()->where('tenant_id', auth()->user()->tenant->id);
+        $query = Provider::on('tenant')->where('tenant_id', auth()->user()->tenant->id);
 
         // Apply search if provided
         if ($this->search) {

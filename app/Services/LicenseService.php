@@ -6,6 +6,7 @@ use App\Models\License;
 use App\Models\Tenant;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class LicenseService
@@ -813,5 +814,14 @@ class LicenseService
         }
 
         return $licenseKey;
+    }
+
+
+    public static function forTenant($tenantId)
+    {
+        return DB::connection('tenant')
+            ->table('licenses')
+            ->where('tenant_id', $tenantId)
+            ->first();
     }
 }

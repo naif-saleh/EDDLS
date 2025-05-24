@@ -6,6 +6,7 @@ use App\Models\SkippedNumber;
 use App\Models\Agent;
 use App\Models\Provider;
 use App\Services\SystemLogService;
+use App\Services\TenantService;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Illuminate\Support\Facades\DB;
@@ -113,8 +114,8 @@ class DistributorSkippedNumbers extends Component
                 ]
             );
 
-            $query = SkippedNumber::query()
-                ->with(['provider', 'agent', 'campaign'])
+            TenantService::setConnection($this->tenant);
+            $query = SkippedNumber::with(['provider', 'agent', 'campaign'])
                 ->select([
                     'phone_number',
                     'provider_id',
@@ -222,6 +223,7 @@ class DistributorSkippedNumbers extends Component
 
     public function render()
     {
+        TenantService::setConnection($this->tenant);
         // Get agents with skipped numbers for filter dropdown
         $agents = Agent::select('agents.*', DB::raw('COUNT(skipped_numbers.id) as count'))
             ->join('skipped_numbers', 'agents.id', '=', 'skipped_numbers.agent_id')
@@ -229,6 +231,7 @@ class DistributorSkippedNumbers extends Component
             ->groupBy('agents.id')
             ->get();
 
+            TenantService::setConnection($this->tenant);
         // Get providers for filter dropdown
         $providers = Provider::select('providers.*', DB::raw('COUNT(skipped_numbers.id) as count'))
             ->join('skipped_numbers', 'providers.id', '=', 'skipped_numbers.provider_id')
@@ -236,6 +239,7 @@ class DistributorSkippedNumbers extends Component
             ->groupBy('providers.id')
             ->get();
 
+            TenantService::setConnection($this->tenant);
         // Build the main query
         $query = SkippedNumber::with(['agent', 'provider', 'campaign'])
             ->where('tenant_id', $this->tenant)

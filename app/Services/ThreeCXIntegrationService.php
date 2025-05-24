@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use App\Models\ApiIntegration;
 use App\Models\CallLog;
 use App\Models\Contact;
+use App\Models\Tenant;
 
 class ThreeCXIntegrationService
 {
@@ -18,10 +19,26 @@ class ThreeCXIntegrationService
     protected $tokenService;
     protected $apiUrl;
     protected $tenantId;
+    protected $tenant;
 
-    public function __construct($tenantId = null, $tokenService = null)
+    public function __construct($tenant = null, $tokenService = null)
     {
-        $this->tenantId = $tenantId ?? auth()->user()->tenant_id;
+        // Handle both tenant object and tenant ID
+        if ($tenant instanceof Tenant) {
+            $this->tenant = $tenant;
+            $this->tenantId = $tenant->id;
+        } elseif (is_numeric($tenant)) {
+            $this->tenantId = $tenant;
+            $this->tenant = Tenant::find($tenant);
+        } else {
+            $this->tenantId = auth()->user()->tenant_id ?? null;
+            $this->tenant = $this->tenantId ? Tenant::find($this->tenantId) : null;
+        }
+
+        if (!$this->tenant) {
+            throw new \Exception('No valid tenant found for ThreeCXIntegrationService');
+        }
+
         $this->tokenService = $tokenService ?? new ThreeCxTokenService($this->tenantId);
         $this->client = new Client();
         $this->loadApiUrl();
@@ -32,7 +49,13 @@ class ThreeCXIntegrationService
      */
     protected function loadApiUrl()
     {
-         $integration = ApiIntegration::where('tenant_id', $this->tenantId)->first();
+        if (!$this->tenant) {
+            Log::error('❌ No tenant found for loading API URL');
+            return;
+        }
+
+        TenantService::setConnection($this->tenant);
+        $integration = ApiIntegration::on('tenant')->where('tenant_id', $this->tenantId)->first();
 
         if (!$integration) {
             Log::error('❌ No API integration found for tenant ID: ' . $this->tenantId);
@@ -234,13 +257,6 @@ class ThreeCXIntegrationService
             throw new \Exception("API URL not configured for tenant: {$this->tenantId}");
         }
 
-        // Check cache for recent call to this number
-        // $cacheKey = "recent_call_{$this->tenantId}_{$destination}";
-        // if (Cache::has($cacheKey)) {
-        //     $recentCall = Cache::get($cacheKey);
-        //     throw new \Exception("Duplicate call attempted to {$destination} for tenant {$this->tenantId}. Previous call ID: {$recentCall['callid']}");
-        // }
-
         try {
             $token = $this->getToken();
             $url = $this->apiUrl . "/callcontrol/{$providerExtension}/makecall";
@@ -260,12 +276,6 @@ class ThreeCXIntegrationService
             if (!isset($responseData['result']['callid'])) {
                 throw new \Exception("Missing call ID in response for tenant {$this->tenantId}");
             }
-
-            // Cache this call to prevent duplicates
-            // Cache::put($cacheKey, [
-            //     'callid' => $responseData['result']['callid'],
-            //     'timestamp' => now(),
-            // ], now()->addMinutes(5));
 
             return $responseData;
         } catch (\Exception $e) {
@@ -397,79 +407,4 @@ public function updateCallRecord($callId, $status, $callsData)
     });
 }
 
-
-
-//     /**
-//      * Update call record in database with consistent format
-//      */
-//     public function AutoDistributerReport($callId, $status, $call)
-//     {
-//         try {
-//             return DB::transaction(function () use ($callId, $status, $call) {
-//                 // Get the existing record in the same transaction to prevent connection issues
-//                 $existingRecord = AutoDistributerReport::where('call_id', $callId)->first();
-
-//                 $duration_time = $existingRecord->duration_time ?? null;
-//                 $dial_duration = $existingRecord->duration_routing ?? null;
-//                 $currentDuration = null;
-
-//                 // Calculate durations if call data is provided
-//                 if ($call && isset($call['EstablishedAt'], $call['ServerNow'])) {
-//                     $establishedAt = Carbon::parse($call['EstablishedAt']);
-//                     $serverNow = Carbon::parse($call['ServerNow']);
-//                     $currentDuration = $establishedAt->diff($serverNow)->format('%H:%I:%S');
-
-//                     // Update durations based on current status
-//                     switch ($status) {
-//                         case 'Talking':
-//                             $duration_time = $currentDuration;
-//                             break;
-//                         case 'Routing':
-//                             $duration_routing = $currentDuration;
-//                             break;
-//                     }
-//                 }
-
-//                 // Update records
-//                 $report = AutoDistributerReport::where('call_id', $callId)->update([
-//                     'status' => $status,
-//                     'duration_time' => $duration_time,
-//                     'duration_routing' => $duration_routing,
-//                 ]);
-
-//                 ADistData::where('call_id', $callId)->update(['state' => $status]);
-
-//                 Log::info("ADistParticipantsCommand ☎️✅ Call status updated for call_id: {$callId}, " .
-//                     'Status: ' . ($call['Status'] ?? 'N/A') .
-//                     ', Duration: ' . ($currentDuration ?? 'N/A'));
-
-//                 return $report;
-//             }, 3); // Add retry attempt parameter
-//         } catch (\Exception $e) {
-//             Log::error("AutoDistributerReport failed: " . $e->getMessage());
-//             // Consider whether to rethrow or handle differently
-//             throw $e;
-//         }
-//     }
-
-
-
-
-
-//     public function isWithinCallWindow(ADistFeed $feed)
-//     {
-//         // Check if the current time is within the allowed time window
-//         $timezone = config('app.timezone');
-//         $now = now()->timezone($timezone);
-//         $from = Carbon::parse("{$feed->date} {$feed->from}", $timezone);
-//         $to = Carbon::parse("{$feed->date} {$feed->to}", $timezone);
-
-//         if ($to->lessThanOrEqualTo($from)) {
-//             $to->addDay(); // Handle overnight case
-//         }
-
-//         return $now->between($from, $to);
-//     }
-
-
- }
+}

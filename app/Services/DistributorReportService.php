@@ -8,6 +8,8 @@ use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\DistributorCallsExport;
+use App\Models\DistributorCallsReport;
+use Illuminate\Support\Facades\Auth;
 
 class DistributorReportService
 {
@@ -23,231 +25,69 @@ class DistributorReportService
     /**
      * Get filtered calls query
      */
-    public function getFilteredCallsQuery(array $filters)
+    public function getFilteredCallLogs($filters = [])
     {
         try {
-            // Log query building start
+            // Log report generation start
             $this->systemLogService->log(
                 logType: 'report',
-                action: 'build_distributor_query',
-                description: 'Started building distributor calls query',
+                action: 'generate_dialer_report',
+                description: 'Started generating dialer call logs report',
                 metadata: [
                     'filters' => $filters,
                     'tenant_id' => $this->tenant_id
                 ]
             );
 
-            $query = CallLog::with(['campaign', 'agent', 'provider', 'contact'])
-                ->where('call_type', 'distributor')
-                ->whereHas('campaign', function($q) {
-                    $q->where('tenant_id', $this->tenant_id);
-                });
+            TenantService::setConnection(Auth::user()->tenant);
+            $query = DistributorCallsReport::where('tenant_id', $this->tenant_id)
+                ->select('distributor_calls_reports.*');
 
-            if (!empty($filters['start_date']) && !empty($filters['end_date'])) {
-                $query->whereBetween('created_at', [
-                    Carbon::parse($filters['start_date']),
-                    Carbon::parse($filters['end_date']),
-                ]);
+            if (!empty($filters['agent'])) {
+                $query->where('agent', 'like', "%{$filters['agent']}%");
             }
 
-            if (!empty($filters['campaign_id'])) {
-                $query->where('campaign_id', $filters['campaign_id']);
+            if (!empty($filters['provider'])) {
+                $query->where('provider', 'like', "%{$filters['provider']}%");
             }
 
-            if (!empty($filters['agent_id'])) {
-                $query->where('agent_id', $filters['agent_id']);
+            if (!empty($filters['campaign'])) {
+                $query->where('campaign', 'like', "%{$filters['campaign']}%");
             }
 
-            if (!empty($filters['provider_id'])) {
-                $query->where('provider_id', $filters['provider_id']);
+            if (!empty($filters['status'])) {
+                $query->where('call_status', $filters['status']);
+            }
+
+            if (!empty($filters['date_from'])) {
+                $query->whereDate('date_time', '>=', $filters['date_from']);
+            }
+
+            if (!empty($filters['date_to'])) {
+                $query->whereDate('date_time', '<=', $filters['date_to']);
             }
 
             if (!empty($filters['search'])) {
-                $query->where(function ($q) use ($filters) {
-                    $q->whereHas('contact', function ($q) use ($filters) {
-                        $q->where('phone_number', 'like', '%' . $filters['search'] . '%');
-                    })
-                    ->orWhereHas('campaign', function ($q) use ($filters) {
-                        $q->where('name', 'like', '%' . $filters['search'] . '%')
-                          ->where('tenant_id', $this->tenant_id);
-                    })
-                    ->orWhereHas('agent', function ($q) use ($filters) {
-                        $q->where('name', 'like', '%' . $filters['search'] . '%')
-                          ->where('tenant_id', $this->tenant_id);
-                    });
+                $search = $filters['search'];
+                $query->where(function ($q) use ($search) {
+                    $q->where('phone_number', 'like', "%{$search}%")
+                      ->orWhere('provider', 'like', "%{$search}%")
+                      ->orWhere('campaign', 'like', "%{$search}%")
+                      ->orWhere('agent', 'like', "%{$search}%");
                 });
             }
 
-            // Log successful query build
+            $results = $query->latest('date_time')->paginate(10);
+
+            // Log successful report generation
             $this->systemLogService->log(
                 logType: 'report',
-                action: 'distributor_query_built',
-                description: 'Successfully built distributor calls query',
+                action: 'dialer_report_generated',
+                description: 'Successfully generated dialer call logs report',
                 metadata: [
                     'filters' => $filters,
-                    'sql' => $query->toSql(),
-                    'bindings' => $query->getBindings()
-                ]
-            );
-
-            return $query;
-        } catch (\Exception $e) {
-            // Log error
-            $this->systemLogService->log(
-                logType: 'error',
-                action: 'distributor_query_failed',
-                description: 'Failed to build distributor calls query',
-                metadata: [
-                    'filters' => $filters,
-                    'error' => $e->getMessage(),
-                    'stack_trace' => $e->getTraceAsString()
-                ]
-            );
-            throw $e;
-        }
-    }
-
-    /**
-     * Calculate call statistics
-     */
-    public function calculateStatistics(array $filters)
-    {
-        try {
-            // Log statistics calculation start
-            $this->systemLogService->log(
-                logType: 'report',
-                action: 'calculate_distributor_statistics',
-                description: 'Started calculating distributor call statistics',
-                metadata: [
-                    'filters' => $filters,
-                    'tenant_id' => $this->tenant_id
-                ]
-            );
-
-            $calls = $this->getFilteredCallsQuery($filters)->get();
-            
-            $totalCalls = $calls->where('call_type', 'distributor')->count();
-            $answered = $calls->where('call_type', 'distributor')->where('call_status', 'Talking')->count();
-            $agentUnanswered = $calls->where('call_type', 'distributor')->where('call_status', 'Initiating')->count();
-            $unanswered = $calls->where('call_type', 'distributor')->whereNotIn('call_status', ['Talking', 'Initiating'])->count();
-
-            $statistics = [
-                'total_calls' => $totalCalls,
-                'answered' => $answered,
-                'unanswered' => $unanswered,
-                'agent_unanswered' => $agentUnanswered
-            ];
-
-            // Log successful statistics calculation
-            $this->systemLogService->log(
-                logType: 'report',
-                action: 'distributor_statistics_calculated',
-                description: 'Successfully calculated distributor call statistics',
-                metadata: [
-                    'filters' => $filters,
-                    'statistics' => $statistics
-                ]
-            );
-
-            return $statistics;
-        } catch (\Exception $e) {
-            // Log error
-            $this->systemLogService->log(
-                logType: 'error',
-                action: 'distributor_statistics_failed',
-                description: 'Failed to calculate distributor call statistics',
-                metadata: [
-                    'filters' => $filters,
-                    'error' => $e->getMessage(),
-                    'stack_trace' => $e->getTraceAsString()
-                ]
-            );
-            throw $e;
-        }
-    }
-
-    /**
-     * Export calls to Excel
-     */
-    public function exportToExcel(array $filters)
-    {
-        try {
-            // Log export start
-            $this->systemLogService->log(
-                logType: 'export',
-                action: 'start_distributor_export',
-                description: 'Started exporting distributor calls to Excel',
-                metadata: [
-                    'filters' => $filters,
-                    'tenant_id' => $this->tenant_id
-                ]
-            );
-
-            $calls = $this->getFilteredCallsQuery($filters)->get();
-            
-            $filename = 'distributor_calls_report_' . now()->format('Y-m-d_H-i-s') . '.xlsx';
-
-            // Log successful export
-            $this->systemLogService->log(
-                logType: 'export',
-                action: 'distributor_export_completed',
-                description: 'Successfully exported distributor calls to Excel',
-                metadata: [
-                    'filters' => $filters,
-                    'record_count' => $calls->count(),
-                    'filename' => $filename
-                ]
-            );
-
-            return Excel::download(
-                new DistributorCallsExport($calls), 
-                $filename
-            );
-        } catch (\Exception $e) {
-            // Log error
-            $this->systemLogService->log(
-                logType: 'error',
-                action: 'distributor_export_failed',
-                description: 'Failed to export distributor calls',
-                metadata: [
-                    'filters' => $filters,
-                    'error' => $e->getMessage(),
-                    'stack_trace' => $e->getTraceAsString()
-                ]
-            );
-            throw $e;
-        }
-    }
-
-    /**
-     * Get real-time search results
-     */
-    public function searchCalls(string $term): Collection
-    {
-        try {
-            // Log search start
-            $this->systemLogService->log(
-                logType: 'search',
-                action: 'search_distributor_calls',
-                description: 'Started searching distributor calls',
-                metadata: [
-                    'search_term' => $term,
-                    'tenant_id' => $this->tenant_id
-                ]
-            );
-
-            $results = $this->getFilteredCallsQuery(['search' => $term])
-                ->limit(10)
-                ->get();
-
-            // Log successful search
-            $this->systemLogService->log(
-                logType: 'search',
-                action: 'distributor_search_completed',
-                description: 'Successfully searched distributor calls',
-                metadata: [
-                    'search_term' => $term,
-                    'result_count' => $results->count()
+                    'record_count' => $results->total(),
+                    'page' => $results->currentPage()
                 ]
             );
 
@@ -256,15 +96,174 @@ class DistributorReportService
             // Log error
             $this->systemLogService->log(
                 logType: 'error',
-                action: 'distributor_search_failed',
-                description: 'Failed to search distributor calls',
+                action: 'dialer_report_failed',
+                description: 'Failed to generate dialer call logs report',
                 metadata: [
-                    'search_term' => $term,
+                    'filters' => $filters,
                     'error' => $e->getMessage(),
                     'stack_trace' => $e->getTraceAsString()
                 ]
             );
             throw $e;
         }
+    }
+
+    public function getCallStatistics($filters = [])
+    {
+        try {
+            // Log statistics calculation start
+            $this->systemLogService->log(
+                logType: 'report',
+                action: 'calculate_dialer_statistics',
+                description: 'Started calculating dialer call statistics',
+                metadata: [
+                    'filters' => $filters,
+                    'tenant_id' => $this->tenant_id
+                ]
+            );
+
+            TenantService::setConnection(Auth::user()->tenant);
+            $query = DistributorCallsReport::where('tenant_id', $this->tenant_id);
+
+            // Apply the same filters as in getFilteredCallLogs
+            if (!empty($filters['agent'])) {
+                $query->where('agent', 'like', "%{$filters['agent']}%");
+            }
+
+            if (!empty($filters['provider'])) {
+                $query->where('provider', 'like', "%{$filters['provider']}%");
+            }
+
+            if (!empty($filters['campaign'])) {
+                $query->where('campaign', 'like', "%{$filters['campaign']}%");
+            }
+
+            if (!empty($filters['status'])) {
+                $query->where('call_status', $filters['status']);
+            }
+
+            if (!empty($filters['date_from'])) {
+                $query->whereDate('date_time', '>=', $filters['date_from']);
+            }
+
+            if (!empty($filters['date_to'])) {
+                $query->whereDate('date_time', '<=', $filters['date_to']);
+            }
+
+            if (!empty($filters['search'])) {
+                $search = $filters['search'];
+                $query->where(function ($q) use ($search) {
+                    $q->where('phone_number', 'like', "%{$search}%")
+                      ->orWhere('provider', 'like', "%{$search}%")
+                      ->orWhere('campaign', 'like', "%{$search}%")
+                      ->orWhere('agent', 'like', "%{$search}%");
+                });
+            }
+
+            $totalCalls = $query->count();
+            $answeredCalls = (clone $query)->where('call_status', 'Talking')->count();
+            $unansweredCalls = (clone $query)->where('call_status', 'Routing')->count();
+            $agentUnansweredCalls = (clone $query)->where('call_status', 'Initiating')->count();
+
+            $statistics = [
+                'total_calls' => $totalCalls,
+                'answered' => $answeredCalls,
+                'unanswered' => $unansweredCalls,
+                'agent_unanswered' => $agentUnansweredCalls,
+                'total' => [
+                    'count' => $totalCalls,
+                    'label' => 'Total Calls',
+                    'icon' => 'M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z',
+                    'color' => 'blue'
+                ],
+                'answered_detail' => [
+                    'count' => $answeredCalls,
+                    'label' => 'Answered Calls',
+                    'icon' => 'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z',
+                    'color' => 'green'
+                ],
+                'unanswered_detail' => [
+                    'count' => $unansweredCalls,
+                    'label' => 'Unanswered Calls',
+                    'icon' => 'M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z',
+                    'color' => 'red'
+                ]
+            ];
+
+            // Log successful statistics calculation
+            $this->systemLogService->log(
+                logType: 'report',
+                action: 'dialer_statistics_calculated',
+                description: 'Successfully calculated dialer call statistics',
+                metadata: [
+                    'filters' => $filters,
+                    'statistics' => [
+                        'total_calls' => $totalCalls,
+                        'answered_calls' => $answeredCalls,
+                        'unanswered_calls' => $unansweredCalls,
+                        'agent_unanswered_calls' => $agentUnansweredCalls
+                    ]
+                ]
+            );
+
+            return $statistics;
+        } catch (\Exception $e) {
+            // Log error
+            $this->systemLogService->log(
+                logType: 'error',
+                action: 'dialer_statistics_failed',
+                description: 'Failed to calculate dialer call statistics',
+                metadata: [
+                    'filters' => $filters,
+                    'error' => $e->getMessage(),
+                    'stack_trace' => $e->getTraceAsString()
+                ]
+            );
+            throw $e;
+        }
+    }
+
+    public function getCallStatus($status)
+    {
+        
+        return match($status) {
+            'Talking' => 'Answered',
+            'Routing' => 'Unanswered',
+            'Initiating' => 'Agent Unanswered',
+            default => $status
+        };
+    }
+
+    public function getAgents()
+    {
+        TenantService::setConnection(Auth::user()->tenant);
+        return DistributorCallsReport::where('tenant_id', $this->tenant_id)
+            ->distinct()
+            ->pluck('agent')
+            ->filter()
+            ->sort()
+            ->values();
+    }
+
+    public function getProviders()
+    {
+        TenantService::setConnection(Auth::user()->tenant);
+        return DistributorCallsReport::where('tenant_id', $this->tenant_id)
+            ->distinct()
+            ->pluck('provider')
+            ->filter()
+            ->sort()
+            ->values();
+    }
+
+    public function getCampaigns()
+    {
+        TenantService::setConnection(Auth::user()->tenant);
+        return DistributorCallsReport::where('tenant_id', $this->tenant_id)
+            ->distinct()
+            ->pluck('campaign')
+            ->filter()
+            ->sort()
+            ->values();
     }
 }

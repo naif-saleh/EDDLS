@@ -14,11 +14,15 @@ return new class extends Migration
         Schema::create('tenants', function (Blueprint $table) {
             $table->id();
             $table->string('slug')->unique();
-            $table->string('name');
+            $table->string('name')->unique();
             $table->string('email')->unique();
             $table->string('phone')->nullable();
             $table->enum('status', ['active', 'inactive'])->default('inactive');
             $table->string('api_key')->unique()->nullable();
+            $table->string('database_name')->nullable();
+            $table->string('database_username')->nullable();
+            $table->string('database_password')->nullable();
+            $table->boolean('database_created')->default(false);
             $table->timestamps();
         });
     }

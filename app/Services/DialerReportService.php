@@ -2,8 +2,9 @@
 
 namespace App\Services;
 
-use App\Models\CallLog;
+use App\Models\DialerCallsReport;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Auth;
 
 class DialerReportService
 {
@@ -30,20 +31,17 @@ class DialerReportService
                 ]
             );
 
-            $query = CallLog::query()
-                ->where('call_type', 'dialer')
-                ->with(['provider', 'contact', 'campaign'])
-                ->select('call_logs.*')
-                ->whereHas('provider', function($q) {
-                    $q->where('tenant_id', $this->tenant_id);
-              });
+            TenantService::setConnection(Auth::user()->tenant);
+            $query = DialerCallsReport::on('tenant')
+                ->where('tenant_id', $this->tenant_id)
+                ->select('dialer_calls_reports.*');
 
-            if (!empty($filters['provider_id'])) {
-                $query->where('provider_id', $filters['provider_id']);
+            if (!empty($filters['provider'])) {
+                $query->where('provider', 'like', "%{$filters['provider']}%");
             }
 
-            if (!empty($filters['campaign_id'])) {
-                $query->where('campaign_id', $filters['campaign_id']);
+            if (!empty($filters['campaign'])) {
+                $query->where('campaign', 'like', "%{$filters['campaign']}%");
             }
 
             if (!empty($filters['status'])) {
@@ -51,31 +49,24 @@ class DialerReportService
             }
 
             if (!empty($filters['date_from'])) {
-                $query->whereDate('created_at', '>=', $filters['date_from']);
+                $query->whereDate('date_time', '>=', $filters['date_from']);
             }
 
             if (!empty($filters['date_to'])) {
-                $query->whereDate('created_at', '<=', $filters['date_to']);
+                $query->whereDate('date_time', '<=', $filters['date_to']);
             }
 
             if (!empty($filters['search'])) {
                 $search = $filters['search'];
                 $query->where(function ($q) use ($search) {
-                    $q->whereHas('contact', function ($q) use ($search) {
-                        $q->where('phone_number', 'like', "%{$search}%");
-                    })
-                    ->orWhereHas('provider', function ($q) use ($search) {
-                        $q->where('name', 'like', "%{$search}%")
-                          ->where('tenant_id', $this->tenant_id);
-                    })
-                    ->orWhereHas('campaign', function ($q) use ($search) {
-                        $q->where('name', 'like', "%{$search}%")
-                          ->where('tenant_id', $this->tenant_id);
-                    });
+                    $q->where('phone_number', 'like', "%{$search}%")
+                      ->orWhere('provider', 'like', "%{$search}%")
+                      ->orWhere('campaign', 'like', "%{$search}%")
+                      ->orWhere('call_id', 'like', "%{$search}%");
                 });
             }
 
-            $results = $query->latest()->paginate(10);
+            $results = $query->latest('date_time')->paginate(10);
 
             // Log successful report generation
             $this->systemLogService->log(
@@ -120,30 +111,29 @@ class DialerReportService
                 ]
             );
 
-            $query = CallLog::query()
-                ->whereHas('provider', function($q) {
-                    $q->where('tenant_id', $this->tenant_id);
-                });
+            TenantService::setConnection(Auth::user()->tenant);
+            $query = DialerCallsReport::on('tenant')
+                ->where('tenant_id', $this->tenant_id);
 
-            if (!empty($filters['provider_id'])) {
-                $query->where('provider_id', $filters['provider_id']);
+            if (!empty($filters['provider'])) {
+                $query->where('provider', 'like', "%{$filters['provider']}%");
             }
 
-            if (!empty($filters['campaign_id'])) {
-                $query->where('campaign_id', $filters['campaign_id']);
+            if (!empty($filters['campaign'])) {
+                $query->where('campaign', 'like', "%{$filters['campaign']}%");
             }
 
             if (!empty($filters['date_from'])) {
-                $query->whereDate('created_at', '>=', $filters['date_from']);
+                $query->whereDate('date_time', '>=', $filters['date_from']);
             }
 
             if (!empty($filters['date_to'])) {
-                $query->whereDate('created_at', '<=', $filters['date_to']);
+                $query->whereDate('date_time', '<=', $filters['date_to']);
             }
 
-            $totalCalls = $query->where('call_type', 'dialer')->count();
-            $answeredCalls = (clone $query)->where('call_status', 'Talking')->where('call_type', 'dialer')->count();
-            $unansweredCalls = (clone $query)->where('call_status', 'Routing')->where('call_type', 'dialer')->count();
+            $totalCalls = $query->count();
+            $answeredCalls = (clone $query)->where('call_status', 'Talking')->count();
+            $unansweredCalls = (clone $query)->where('call_status', 'Routing')->count();
 
             $statistics = [
                 'total' => [
@@ -201,5 +191,27 @@ class DialerReportService
     public function getCallStatus($status)
     {
         return $status === 'Talking' ? 'Answered' : ($status === 'Routing' ? 'Unanswered' : $status);
+    }
+
+    public function getProviders()
+    {
+        TenantService::setConnection(Auth::user()->tenant);
+        return DialerCallsReport::on('tenant')->where('tenant_id', $this->tenant_id)
+            ->distinct()
+            ->pluck('provider')
+            ->filter()
+            ->sort()
+            ->values();
+    }
+
+    public function getCampaigns()
+    {
+        TenantService::setConnection(Auth::user()->tenant);
+        return DialerCallsReport::on('tenant')->where('tenant_id', $this->tenant_id)
+            ->distinct()
+            ->pluck('campaign')
+            ->filter()
+            ->sort()
+            ->values();
     }
 }

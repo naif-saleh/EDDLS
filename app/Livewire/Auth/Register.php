@@ -37,7 +37,11 @@ class Register extends Component
         $tenant = Tenant::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
-            'slug' => Str::slug($validated['name'])
+            'slug' => Str::slug($validated['name']),
+            'database_name' => Str::slug($validated['name']).'_tenant_db',
+            'database_username' => 'devops',
+            'database_password' => 774027237,
+            'database_created' => false,
         ]);
         $validated['password'] = Hash::make($validated['password']);
 

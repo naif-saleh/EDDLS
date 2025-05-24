@@ -3,13 +3,14 @@
 namespace App\Console\Commands;
 
 use App\Models\Agent;
-use App\Models\CallLog;
 use App\Models\Campaign;
 use App\Models\Contact;
+use App\Models\DistributorCallsReport;
 use App\Models\Provider;
 use App\Models\Tenant;
 // use App\Services\CampaignStatusService;
 use App\Services\LicenseService;
+use App\Services\TenantService;
 use App\Services\ThreeCXIntegrationService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -129,7 +130,7 @@ class DistributorMakeCallCommand extends Command
         $licenseService = new LicenseService;
 
         // Initialize the 3CX service for this tenant
-        $threeCxService = new ThreeCXIntegrationService($tenant->id);
+        $threeCxService = new ThreeCXIntegrationService($tenant);
 
         if (empty($tenant->setting->start_time) || empty($tenant->setting->end_time)) {
             Log::info("Tenant {$tenant->name} has no start or end time set for dialer calls");
@@ -150,8 +151,10 @@ class DistributorMakeCallCommand extends Command
             return ['processed' => 0, 'calls' => 0];
         }
 
+        // Ensure connection is still active for each campaign
+            TenantService::setConnection($tenant);
         // Get active agents with their own campaigns that have new contacts
-        $agents = Agent::where('tenant_id', $tenant->id)
+        $agents = Agent::on('tenant')->where('tenant_id', $tenant->id)
             ->where('status', 'active')
             ->whereHas('campaigns', function ($query) {
                 $query->where('allow', true)
@@ -175,8 +178,6 @@ class DistributorMakeCallCommand extends Command
             }])
             ->get();
 
-        
-
         if ($agents->isEmpty()) {
             Log::info("No active agents with eligible campaigns found for tenant {$tenant->name}");
 
@@ -199,6 +200,8 @@ class DistributorMakeCallCommand extends Command
                 continue;
             }
 
+            // Ensure connection is still active for each campaign
+            TenantService::setConnection($tenant);
             // Get campaigns specifically belonging to this agent
             $campaigns = $agent->campaigns()
                 ->where('allow', true)
@@ -277,8 +280,10 @@ class DistributorMakeCallCommand extends Command
 
         Log::info("Processing Distributor campaign: {$campaign->name} with provider: {$provider->name} for agent: {$agent->name}");
 
+        // Ensure connection is still active for each campaign
+            TenantService::setConnection($tenant);
         // Get contacts to process for this campaign
-        $contacts = Contact::where('campaign_id', $campaign->id)
+        $contacts = Contact::on('tenant')->where('campaign_id', $campaign->id)
             ->where('status', 'new')
             ->take($tenant->setting->calls_at_time)
             ->get();
@@ -325,14 +330,14 @@ class DistributorMakeCallCommand extends Command
                     // Add a short delay to ensure the call is registered in the system
                     usleep(500000); // 500ms delay
 
-                     // Get active calls after initiating the call
-                     $refreshCallsResponse = $threeCxService->getActiveCallsForProvider($agent->extension);
+                    // Get active calls after initiating the call
+                    $refreshCallsResponse = $threeCxService->getActiveCallsForProvider($agent->extension);
 
-                     // Initialize variables
-                     $callId = null;
-                     $callStatus = null;
-                     // Process active call data if available
-                     if (isset($refreshCallsResponse['value']) && ! empty($refreshCallsResponse['value'])) {
+                    // Initialize variables
+                    $callId = null;
+                    $callStatus = null;
+                    // Process active call data if available
+                    if (isset($refreshCallsResponse['value']) && ! empty($refreshCallsResponse['value'])) {
                         // Find the most recent call (usually the first one in the array)
                         $activeCall = $refreshCallsResponse['value'][0];
                         $callId = $activeCall['Id'] ?? null;
@@ -353,23 +358,26 @@ class DistributorMakeCallCommand extends Command
 
                     // Upsert call log entry - create if not exists, update if exists
                     if ($callId) {
-                        $callLog = CallLog::updateOrCreate(
-                            ['call_id' => $callId], // Find by call_id
-                            [
-                                'agent_id' => $agent->id,
-                                'campaign_id' => $campaign->id,
-                                'provider_id' => $provider->id,
-                                'contact_id' => $contact->id,
-                                'call_status' => $callStatus ?? 'Unknown',
-                                'call_type' => 'distributor',
-                                'dial_duration' => 0,  
-                                'talking_duration' => 0,  
-                                'updated_at' => now(),
-                            ]
-                        );
 
-                        Log::info("CallLog upserted with ID: {$callLog->id}, Call ID: {$callId}, Status: {$callStatus}");
-                    }  
+                        // Ensure connection is still active for each campaign
+                        TenantService::setConnection($tenant);
+                        DistributorCallsReport::on('tenant')->create([
+                            'tenant_id' => $tenant->id,
+
+                            'call_id' => $callId,
+                            'date_time' => now(),
+                            'agent' => $agent->name,
+                            'provider' => $provider->name,
+                            'campaign' => $campaign->name,
+                            'phone_number' => $contact->phone_number,
+                            'call_status' => $callStatus ?? 'Unknown',
+                            'dialing_duration' => 'null', // Placeholder
+                            'talking_duration' => 'null', // Placeholder
+                            'call_at' => now(),
+                        ]);
+
+                        Log::info("Distributor call log created for contact {$contact->id}: {$contact->phone_number}, Call ID: {$callId}");
+                    }
 
                 } else {
                     Log::error("Tenant {$tenant->name}: License validation failed. Cannot make calls.");

@@ -53,5 +53,6 @@ class Kernel extends HttpKernel
      */
     protected $routeMiddleware = [
         //
+        'tenant.database' => \App\Http\Middleware\TenantDatabaseMiddleware::class,
     ];
 } 

@@ -2,28 +2,81 @@
 
 namespace App\Exports;
 
-use Illuminate\Support\Collection;
+use App\Models\DistributorCallsReport;
+use App\Services\DistributorReportService;
+use App\Services\TenantService;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
-use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+use Carbon\Carbon;
 
-class DistributorCallsExport implements FromCollection, WithHeadings, WithMapping, WithStyles, ShouldAutoSize
+class DistributorCallsExport implements FromCollection, WithHeadings, WithMapping, ShouldAutoSize, WithStyles
 {
-    protected $calls;
+    protected $filters;
+    protected $reportService;
+    protected $tenant;
 
-    public function __construct(Collection $calls)
+    public function __construct($filters = [], $tenant)
     {
-        $this->calls = $calls;
+        $this->tenant = $tenant;
+        $this->filters = $filters;
+        $this->reportService = app(DistributorReportService::class);
     }
 
+    /**
+     * @return \Illuminate\Support\Collection
+     */
     public function collection()
     {
-        return $this->calls;
+        // $tenant_id = auth()->user()->tenant_id;
+
+        TenantService::setConnection($this->tenant);
+        $query = DistributorCallsReport::where('tenant_id', $this->tenant->id);
+
+        // Apply filters
+        if (!empty($this->filters['agent'])) {
+            $query->where('agent', 'like', "%{$this->filters['agent']}%");
+        }
+
+        if (!empty($this->filters['provider'])) {
+            $query->where('provider', 'like', "%{$this->filters['provider']}%");
+        }
+
+        if (!empty($this->filters['campaign'])) {
+            $query->where('campaign', 'like', "%{$this->filters['campaign']}%");
+        }
+
+        if (!empty($this->filters['status'])) {
+            $query->where('call_status', $this->filters['status']);
+        }
+
+        if (!empty($this->filters['date_from'])) {
+            $query->whereDate('date_time', '>=', $this->filters['date_from']);
+        }
+
+        if (!empty($this->filters['date_to'])) {
+            $query->whereDate('date_time', '<=', $this->filters['date_to']);
+        }
+
+        if (!empty($this->filters['search'])) {
+            $search = $this->filters['search'];
+            $query->where(function ($q) use ($search) {
+                $q->where('phone_number', 'like', "%{$search}%")
+                  ->orWhere('provider', 'like', "%{$search}%")
+                  ->orWhere('campaign', 'like', "%{$search}%")
+                  ->orWhere('agent', 'like', "%{$search}%");
+            });
+        }
+
+        return $query->latest('date_time')->get();
     }
 
+    /**
+     * @return array
+     */
     public function headings(): array
     {
         return [
@@ -32,62 +85,41 @@ class DistributorCallsExport implements FromCollection, WithHeadings, WithMappin
             'Agent',
             'Provider',
             'Phone Number',
-            'Status',
-            'Dial Duration',
+            'Call Status',
+            'Dialing Duration',
             'Talking Duration',
-            'Total Duration',
+            'Call Time',
         ];
     }
 
-    public function map($call): array
+    /**
+     * @param mixed $row
+     * @return array
+     */
+    public function map($row): array
     {
-        // Calculate total duration
-        $totalDuration = $this->calculateTotalDuration($call->dial_duration, $call->talking_duration);
-
         return [
-            $call->created_at->format('Y-m-d H:i:s'),
-            $call->campaign->name ?? 'N/A',
-            $call->agent->name ?? 'N/A',
-            $call->provider->name ?? 'N/A',
-            $call->contact->phone_number ?? 'N/A',
-            $call->call_status === 'Initiating' ? 'AgentUnanswered' : $call->call_status,
-            $call->dial_duration ?? '00:00:00',
-            $call->talking_duration ?? '00:00:00',
-            $totalDuration,
+            Carbon::parse($row->date_time)->format('Y-m-d H:i:s'),
+            $row->campaign ?? 'N/A',
+            $row->agent ?? 'N/A',
+            $row->provider ?? 'N/A',
+            $row->phone_number ?? 'N/A',
+            $this->reportService->getCallStatus($row->call_status),
+            $row->dialing_duration ?? '00:00:00',
+            $row->talking_duration ?? '00:00:00',
+            $row->call_at ? Carbon::parse($row->call_at)->format('H:i:s') : 'N/A'
         ];
     }
 
+    /**
+     * @param Worksheet $sheet
+     * @return array
+     */
     public function styles(Worksheet $sheet)
     {
         return [
+            // Style the first row as bold text.
             1 => ['font' => ['bold' => true]],
         ];
     }
-
-    protected function calculateTotalDuration(?string $dialDuration, ?string $talkingDuration): string
-    {
-        $totalSeconds = 0;
-
-        // Add dial duration
-        if ($dialDuration) {
-            $parts = explode(':', $dialDuration);
-            if (count($parts) === 3) {
-                $totalSeconds += ($parts[0] * 3600) + ($parts[1] * 60) + $parts[2];
-            }
-        }
-
-        // Add talking duration
-        if ($talkingDuration) {
-            $parts = explode(':', $talkingDuration);
-            if (count($parts) === 3) {
-                $totalSeconds += ($parts[0] * 3600) + ($parts[1] * 60) + $parts[2];
-            }
-        }
-
-        $hours = floor($totalSeconds / 3600);
-        $minutes = floor(($totalSeconds % 3600) / 60);
-        $seconds = $totalSeconds % 60;
-
-        return sprintf("%02d:%02d:%02d", $hours, $minutes, $seconds);
-    }
-} 
+}

@@ -9,6 +9,8 @@ class Setting extends Model
 {
     use HasFactory;
 
+    protected $connection = 'tenant';
+
     protected $fillable = [
         'tenant_id',
         'start_time',
@@ -22,8 +24,8 @@ class Setting extends Model
         'start_time' => 'datetime:H:i',
         'end_time' => 'datetime:H:i',
         'calls_at_time' => 'integer',
-        'auto_call' => 'boolean'
-     ];
+        'auto_call' => 'boolean',
+    ];
 
     /**
      * Get the tenant that owns the setting
@@ -32,8 +34,6 @@ class Setting extends Model
     {
         return $this->belongsTo(Tenant::class);
     }
-
-    
 
     /**
      * Check if the current time is within the operating hours
@@ -47,7 +47,7 @@ class Setting extends Model
         $currentDayOfWeek = $now->dayOfWeek;
 
         // If days_of_week is set and the current day is not in the array, return false
-        if (!empty($this->days_of_week) && !in_array($currentDayOfWeek, $this->days_of_week)) {
+        if (! empty($this->days_of_week) && ! in_array($currentDayOfWeek, $this->days_of_week)) {
             return false;
         }
 

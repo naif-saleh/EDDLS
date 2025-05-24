@@ -1,15 +1,16 @@
 <?php
+
 // app/Providers/RouteServiceProvider.php
 
 namespace App\Providers;
 
 use App\Models\Provider;
+use App\Services\TenantService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvider;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
-use App\Models\Tenant;
 
 class RouteServiceProvider extends ServiceProvider
 {
@@ -33,19 +34,19 @@ class RouteServiceProvider extends ServiceProvider
 
         $this->routes(function () {
 
-
             Route::middleware('web')
                 ->group(base_path('routes/web.php'));
 
-                Route::bind('provider', function ($value) {
-                    $currentTenantId = auth()->user()->tenant_id;
-                    return Provider::where('slug', $value)
-                                  ->where('tenant_id', $currentTenantId)
-                                  ->firstOrFail();
-                });
+            Route::bind('provider', function ($value) {
+                $currentTenantId = auth()->user()->tenant_id;
+
+                TenantService::setConnection(auth()->user()->tenant);
+                return Provider::where('slug', $value)
+                    ->where('tenant_id', $currentTenantId)
+                    ->firstOrFail();
+            });
 
         });
-
 
     }
 

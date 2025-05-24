@@ -127,6 +127,7 @@ class SystemLogService
             $data['model_id'] = $model->getKey();
         }
 
+        // TenantService::setConnection(Auth::user()->tenant);
         return SystemLog::create($data);
     }
 

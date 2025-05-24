@@ -24,7 +24,7 @@ class ContactUploadModal extends Component
     public $totalContacts = 0;
     public $fileName;
     public $batchId;
-    public $tenantId = '';
+    public $tenant = '';
 
     protected function getListeners()
     {
@@ -41,10 +41,10 @@ class ContactUploadModal extends Component
     public function mount()
 {
     $this->showModal = false;
-    $this->tenantId = auth()->user()->tenant_id;
+    $this->tenant = auth()->user()->tenant;
 
     // Add debug logging to verify tenant ID
-    Log::info("Modal mounted for tenant ID: {$this->tenantId}");
+    Log::info("Modal mounted for tenant ID: {$this->tenant->id}");
 }
 
     public function openModal()
@@ -79,9 +79,9 @@ class ContactUploadModal extends Component
 
         try {
             // Verify tenant ID is set and log it
-            if (empty($this->tenantId)) {
-                $this->tenantId = auth()->user()->tenant_id;
-                Log::warning("Tenant ID was empty, set to: {$this->tenantId}");
+            if (empty($this->tenant)) {
+                $this->tenant = auth()->user()->tenant->id;
+                Log::warning("Tenant ID was empty, set to: {$this->tenant->id}");
             }
 
             // Generate a unique batch ID for tracking this import
@@ -109,8 +109,8 @@ class ContactUploadModal extends Component
                 Cache::put("csv-import-{$this->batchId}-total", $this->totalContacts, now()->addHours(1));
 
                 // Start batch job processing with explicit tenant ID
-                Log::info("Dispatching CSV job with: batch={$this->batchId}, file={$this->fileName}, tenant={$this->tenantId}");
-                ProcessCsvContactsBatchFile::dispatch($fullPath, $this->batchId, $this->fileName, $this->tenantId);
+                Log::info("Dispatching CSV job with: batch={$this->batchId}, file={$this->fileName}, tenant={$this->tenant->name}");
+                ProcessCsvContactsBatchFile::dispatch($fullPath, $this->batchId, $this->fileName, $this->tenant);
 
                 // Start polling for progress updates
                 $this->pollingInterval = 2000; // 2 seconds
@@ -123,7 +123,7 @@ class ContactUploadModal extends Component
             Log::error("Error in CSV processing: " . $e->getMessage(), [
                 'exception' => $e,
                 'file' => $this->fileName ?? 'unknown',
-                'tenant_id' => $this->tenantId
+                'tenant_id' => $this->tenant->id
             ]);
         }
     }

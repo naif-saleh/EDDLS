@@ -4,6 +4,9 @@ namespace App\Jobs;
 
 use App\Models\CallLog;
 use App\Models\Contact;
+use App\Models\DialerCallsReport;
+use App\Models\Tenant;
+use App\Services\TenantService;
 use App\Services\ThreeCXIntegrationService;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
@@ -86,13 +89,37 @@ class DialerUpdateCallStatusJob implements ShouldQueue
     public function handle()
     {
         try {
-            $threeCxService = new ThreeCXIntegrationService($this->tenantId);
-            $this->updateCallRecord();
-        } catch (\Exception $e) {
-            Log::error("Error in UpdateCallStatusJob: {$e->getMessage()}", [
+            // First, get and validate the tenant
+            $tenant = Tenant::find($this->tenantId);
+            if (!$tenant) {
+                Log::error("Tenant not found for UpdateCallStatusJob", [
+                    'tenant_id' => $this->tenantId,
+                    'call_id' => $this->callId,
+                ]);
+                return;
+            }
+
+            // Set up tenant connection
+            TenantService::setConnection($tenant);
+            
+            // Test the connection
+            DB::connection('tenant')->select('SELECT 1');
+            
+            Log::info("Processing call status update", [
                 'tenant_id' => $this->tenantId,
                 'call_id' => $this->callId,
+                'status' => $this->callStatus,
+            ]);
+
+            $this->updateCallRecord($tenant);
+            
+        } catch (\Exception $e) {
+            Log::error("Error in DialerUpdateCallStatusJob: {$e->getMessage()}", [
+                'tenant_id' => $this->tenantId,
+                'call_id' => $this->callId,
+                'call_status' => $this->callStatus,
                 'exception' => $e,
+                'trace' => $e->getTraceAsString(),
             ]);
             
             // Rethrow if we want the job to retry
@@ -105,12 +132,13 @@ class DialerUpdateCallStatusJob implements ShouldQueue
     /**
      * Update call record in database with consistent format
      * 
+     * @param Tenant $tenant
      * @return mixed
      */
-    protected function updateCallRecord()
+    protected function updateCallRecord(Tenant $tenant)
     {
         $talking_duration = null;
-        $dial_duration = null;
+        $dialing_duration = null;
         $currentDuration = null;
         
         // Find the specific call data in the array
@@ -124,53 +152,154 @@ class DialerUpdateCallStatusJob implements ShouldQueue
 
         // Calculate durations if call data is found
         if ($callData && isset($callData['EstablishedAt']) && isset($callData['ServerNow'])) {
-            $establishedAt = Carbon::parse($callData['EstablishedAt']);
-            $serverNow = Carbon::parse($callData['ServerNow']);
-            $currentDuration = $establishedAt->diff($serverNow)->format('%H:%I:%S');
+            try {
+                $establishedAt = Carbon::parse($callData['EstablishedAt']);
+                $serverNow = Carbon::parse($callData['ServerNow']);
+                $currentDuration = $establishedAt->diff($serverNow)->format('%H:%I:%S');
+                
+                Log::info("Duration calculated", [
+                    'call_id' => $this->callId,
+                    'established_at' => $callData['EstablishedAt'],
+                    'server_now' => $callData['ServerNow'],
+                    'current_duration' => $currentDuration,
+                ]);
+                
+            } catch (\Exception $e) {
+                Log::warning("Failed to calculate duration", [
+                    'call_id' => $this->callId,
+                    'established_at' => $callData['EstablishedAt'] ?? 'missing',
+                    'server_now' => $callData['ServerNow'] ?? 'missing',
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return DB::connection('tenant')->transaction(function () use ($talking_duration, $dialing_duration, $currentDuration, $tenant) {
+            // Ensure tenant connection is still active within the transaction
+            TenantService::setConnection($tenant);
             
-            // Retrieve existing record to preserve any existing durations
-            $existingRecord = CallLog::where('call_id', $this->callId)->first();
+            // Get existing record to preserve durations
+            $existingRecord = DialerCallsReport::on('tenant')->where('call_id', $this->callId)->first();
 
             if ($existingRecord) {
                 // Update durations based on current status
                 switch ($this->callStatus) {
                     case 'Talking':
-                        $talking_duration = $currentDuration;
-                        $dial_duration = $existingRecord->dial_duration;
+                        $talking_duration = $currentDuration ?? $existingRecord->talking_duration;
+                        $dialing_duration = $existingRecord->dialing_duration;
                         break;
                     case 'Routing':
-                        $dial_duration = $currentDuration;
+                    case 'Ringing':
+                        $dialing_duration = $currentDuration ?? $existingRecord->dialing_duration;
                         $talking_duration = $existingRecord->talking_duration;
+                        break;
+                    case 'Completed':
+                    case 'Ended':
+                    case 'Disconnected':
+                        // Preserve existing durations for completed calls
+                        $talking_duration = $existingRecord->talking_duration;
+                        $dialing_duration = $existingRecord->dialing_duration;
                         break;
                     default:
                         $talking_duration = $existingRecord->talking_duration;
-                        $dial_duration = $existingRecord->dial_duration;
+                        $dialing_duration = $existingRecord->dialing_duration;
                 }
+
+                // Update the report
+                $updated = DialerCallsReport::on('tenant')->where('call_id', $this->callId)->update([
+                    'call_status' => $this->callStatus,
+                    'talking_duration' => $talking_duration,
+                    'dialing_duration' => $dialing_duration,
+                    'updated_at' => now(),
+                ]);
+
+                if ($updated) {
+                    Log::info("DialerCallsReport updated successfully", [
+                        'call_id' => $this->callId,
+                        'status' => $this->callStatus,
+                        'talking_duration' => $talking_duration,
+                        'dialing_duration' => $dialing_duration,
+                    ]);
+                } else {
+                    Log::warning("DialerCallsReport update returned 0 affected rows", [
+                        'call_id' => $this->callId,
+                        'status' => $this->callStatus,
+                    ]);
+                }
+
+                // Update related contact status if needed
+                try {
+                    $contactUpdated = Contact::on('tenant')->where('call_id', $this->callId)->update([
+                        'status' => $this->mapCallStatusToContactStatus($this->callStatus),
+                        'updated_at' => now(),
+                    ]);
+
+                    if ($contactUpdated > 0) {
+                        Log::info("Contact status updated", [
+                            'call_id' => $this->callId,
+                            'contact_status' => $this->mapCallStatusToContactStatus($this->callStatus),
+                            'contacts_updated' => $contactUpdated,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning("Failed to update contact status", [
+                        'call_id' => $this->callId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                Log::info("UpdateCallStatusJob ☎️✅ Call status updated for call_id: {$this->callId}, " .
+                    "Status: {$this->callStatus}, " .
+                    "Duration: " . ($currentDuration ?? 'N/A'));
+
+                return $updated;
+                
+            } else {
+                Log::warning("No existing DialerCallsReport found for call_id: {$this->callId}");
+                return false;
             }
-        } else {
-            // If updating without call data, preserve existing durations
-            $existingRecord = CallLog::where('call_id', $this->callId)->first();
-
-            if ($existingRecord) {
-                $talking_duration = $existingRecord->talking_duration ?? null;
-                $dial_duration = $existingRecord->dial_duration ?? null;
-            }
-        }
-
-        return DB::transaction(function () use ($talking_duration, $dial_duration, $currentDuration) {
-            $report = CallLog::where('call_id', $this->callId)->update([
-                'call_status' => $this->callStatus,
-                'talking_duration' => $talking_duration,
-                'dial_duration' => $dial_duration,
-            ]);
-
-            Contact::where('call_id', $this->callId)->update(['status' => $this->callStatus]);
-
-            Log::info("UpdateCallStatusJob ☎️✅ Call status updated for call_id: {$this->callId}, " .
-                "Status: {$this->callStatus}, " .
-                "Duration: " . ($currentDuration ?? 'N/A'));
-
-            return $report;
         });
+    }
+
+    /**
+     * Map call status to appropriate contact status
+     * 
+     * @param string $callStatus
+     * @return string
+     */
+    protected function mapCallStatusToContactStatus($callStatus)
+    {
+        switch ($callStatus) {
+            case 'Talking':
+                return 'talking';
+            case 'Routing':
+            case 'Ringing':
+                return 'calling';
+            case 'Completed':
+            case 'Ended':
+                return 'completed';
+            case 'Disconnected':
+            case 'Failed':
+                return 'failed';
+            default:
+                return 'calling';
+        }
+    }
+
+    /**
+     * Handle a job failure.
+     *
+     * @param \Throwable $exception
+     * @return void
+     */
+    public function failed(\Throwable $exception)
+    {
+        Log::error("DialerUpdateCallStatusJob failed permanently", [
+            'tenant_id' => $this->tenantId,
+            'call_id' => $this->callId,
+            'call_status' => $this->callStatus,
+            'exception' => $exception->getMessage(),
+            'trace' => $exception->getTraceAsString(),
+        ]);
     }
 }
